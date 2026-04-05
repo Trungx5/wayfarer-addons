@@ -1,11 +1,11 @@
 // ==UserScript==
-// @name         Wayfarer Nomination Stats
-// @version      0.0.1
-// @description  Add extended Wayfarer Profile stats
-// @namespace    https://github.com/tehstone/wayfarer-addons/
-// @downloadURL  https://github.com/tehstone/wayfarer-addons/raw/main/wayfarer-nomination-stats-plots.user.js
-// @homepageURL  https://github.com/tehstone/wayfarer-addons/
-// @match        https://wayfarer.nianticlabs.com/*
+// @name        Wayfarer Nomination Stats Plots (Dev)
+// @version     0.0.2
+// @description Plot nomination trends and location summaries on the Wayfarer nominations page
+// @namespace   https://github.com/toadlover/wayfarer-addons/
+// @downloadURL https://raw.githubusercontent.com/toadlover/wayfarer-addons/main/wayfarer-nomination-stats-plots.user.js
+// @homepageURL https://github.com/toadlover/wayfarer-addons/
+// @match       https://wayfarer.nianticlabs.com/*
 // ==/UserScript==
 
 // Copyright 2024 tehstone, Tntnnbltn
@@ -82,6 +82,8 @@ function init() {
             .then((ref) => {
             addNotificationDiv();
             addCss();
+            //add debug panel
+            addDebugPanel();
 
             const countsByTypeAndStatus = {
                 "NOMINATION": {},
@@ -588,6 +590,40 @@ function init() {
       link.remove();
 
       URL.revokeObjectURL(objectURL);
+    }
+
+
+    // Create a debug panel for testing
+    function addDebugPanel() {
+      if (document.getElementById('wfns-plots-debug')) return;
+
+      const panel = document.createElement('div');
+      panel.id = 'wfns-plots-debug';
+      panel.style.cssText = [
+        'margin: 12px 0',
+        'padding: 12px 16px',
+        'border: 2px solid #e0e0e0',
+        'border-radius: 8px',
+        'background: #fffbe6',
+        'color: #222',
+        'font-size: 14px',
+        'font-weight: 600'
+      ].join(';');
+
+      const count = Array.isArray(nominations) ? nominations.length : 0;
+      panel.textContent = `Wayfarer nomination plots script loaded. Nominations detected: ${count}`;
+
+      const list = document.querySelector('app-submissions-list');
+      if (list && list.parentNode) {
+        list.parentNode.insertBefore(panel, list);
+      } else {
+        document.body.appendChild(panel);
+      }
+
+      console.log('WFNS plots debug: script loaded', {
+        nominationsCount: count,
+        sample: Array.isArray(nominations) ? nominations.slice(0, 3) : []
+      });
     }
 
     window.saveFile = typeof android === 'undefined' || !android.saveFile
