@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name        Wayfarer Nomination Stats Plots (Dev)
-// @version     0.0.2
+// @version     0.0.3
 // @description Plot nomination trends and location summaries on the Wayfarer nominations page
 // @namespace   https://github.com/toadlover/wayfarer-addons/
 // @downloadURL https://raw.githubusercontent.com/toadlover/wayfarer-addons/main/wayfarer-nomination-stats-plots.user.js
@@ -82,8 +82,17 @@ function init() {
             .then((ref) => {
             addNotificationDiv();
             addCss();
-            //add debug panel
-            addDebugPanel();
+
+            //start addition of basic bar plot
+            const areaCounts = getAcceptedNominationsByArea(nominations);
+
+            const chart = renderBarChart(areaCounts, "Accepted Nominations (NOMINATION only) by Area");
+
+            const list = document.querySelector('app-submissions-list');
+            if (list && list.parentNode) {
+              list.parentNode.insertBefore(chart, list);
+            }
+            //end addition of basic bar plot
 
             const countsByTypeAndStatus = {
                 "NOMINATION": {},
@@ -592,38 +601,74 @@ function init() {
       URL.revokeObjectURL(objectURL);
     }
 
+    // Derive nomination location data
+    function getAcceptedNominationsByArea(nominations) {
+      const counts = {};
 
-    // Create a debug panel for testing
-    function addDebugPanel() {
-      if (document.getElementById('wfns-plots-debug')) return;
+      nominations.forEach(n => {
+        if (!n) return;
 
-      const panel = document.createElement('div');
-      panel.id = 'wfns-plots-debug';
-      panel.style.cssText = [
-        'margin: 12px 0',
-        'padding: 12px 16px',
-        'border: 2px solid #e0e0e0',
-        'border-radius: 8px',
-        'background: #fffbe6',
-        'color: #222',
-        'font-size: 14px',
-        'font-weight: 600'
-      ].join(';');
+        // Filter: only nominations + accepted
+        if (n.type !== 'NOMINATION') return;
+        if (n.status !== 'ACCEPTED') return;
 
-      const count = Array.isArray(nominations) ? nominations.length : 0;
-      panel.textContent = `Wayfarer nomination plots script loaded. Nominations detected: ${count}`;
+        // Define area (edit this based on your actual fields)
+        const city = n.city || 'Unknown City';
+        const state = n.state || 'Unknown State';
+        const area = `${city}, ${state}`;
 
-      const list = document.querySelector('app-submissions-list');
-      if (list && list.parentNode) {
-        list.parentNode.insertBefore(panel, list);
-      } else {
-        document.body.appendChild(panel);
+        counts[area] = (counts[area] || 0) + 1;
+      });
+
+      return counts;
+    }
+
+    // Function to render a basic bar chart of accepted nominations
+    function renderBarChart(dataObj, title = "Accepted Nominations by Area") {
+      const container = document.createElement('div');
+      container.style.cssText = `
+        margin: 16px 0;
+        padding: 16px;
+        border: 1px solid #ddd;
+        border-radius: 8px;
+        background: #ffffff;
+      `;
+
+      const heading = document.createElement('h3');
+      heading.textContent = title;
+      heading.style.marginBottom = '12px';
+      container.appendChild(heading);
+
+      const entries = Object.entries(dataObj)
+        .sort((a, b) => b[1] - a[1]); // descending
+
+      if (entries.length === 0) {
+        container.appendChild(document.createTextNode("No data available."));
+        return container;
       }
 
-      console.log('WFNS plots debug: script loaded', {
-        nominationsCount: count,
-        sample: Array.isArray(nominations) ? nominations.slice(0, 3) : []
+      const maxVal = Math.max(...entries.map(e => e[1]));
+
+      entries.forEach(([label, value]) => {
+        const row = document.createElement('div');
+        row.style.marginBottom = '6px';
+
+        const text = document.createElement('div');
+        text.textContent = `${label} (${value})`;
+        text.style.fontSize = '12px';
+
+        const bar = document.createElement('div');
+        bar.style.height = '14px';
+        bar.style.width = `${(value / maxVal) * 100}%`;
+        bar.style.background = '#4CAF50';
+        bar.style.borderRadius = '4px';
+
+        row.appendChild(text);
+        row.appendChild(bar);
+        container.appendChild(row);
       });
+
+      return container;
     }
 
     window.saveFile = typeof android === 'undefined' || !android.saveFile
