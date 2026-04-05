@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name        Wayfarer Nomination Stats Plots (Dev)
-// @version     0.0.6
+// @version     0.0.7
 // @description Plot nomination trends and location summaries on the Wayfarer nominations page
 // @namespace   https://github.com/toadlover/wayfarer-addons/
 // @downloadURL https://raw.githubusercontent.com/toadlover/wayfarer-addons/main/wayfarer-nomination-stats-plots.user.js
@@ -49,8 +49,10 @@ function init() {
 
     const PLOT_TYPE_OPTIONS = [
       "NOMINATION",
-      "EDIT",
-      "PHOTO"
+      "PHOTO",
+      "EDIT_TITLE",
+      "EDIT_DESCRIPTION",
+      "EDIT_LOCATION"
     ];
 
     const EDIT_SUBTYPES = [
@@ -58,6 +60,26 @@ function init() {
       "EDIT_DESCRIPTION",
       "EDIT_LOCATION"
     ];
+
+    const STATUS_DISPLAY = {
+      ACCEPTED: "Accepted",
+      REJECTED: "Rejected",
+      DUPLICATE: "Duplicates",
+      VOTING: "In Voting",
+      NOMINATED: "In Queue",
+      NIANTIC_REVIEW: "NIA Review",
+      APPEALED: "Appealed",
+      WITHDRAWN: "Withdrawn",
+      HELD: "On Hold"
+    };
+
+    const TYPE_DISPLAY = {
+      NOMINATION: "Nominations",
+      PHOTO: "Photos",
+      EDIT_TITLE: "Edit Title",
+      EDIT_DESCRIPTION: "Edit Description",
+      EDIT_LOCATION: "Edit Location"
+    };
 
     const plotState = {
       selectedStatuses: new Set(["ACCEPTED"]),
@@ -802,7 +824,7 @@ function init() {
         label.style.marginBottom = "4px";
         label.innerHTML = `
           <input type="checkbox" data-type="${type}" ${plotState.selectedTypes.has(type) ? "checked" : ""}>
-          ${type}
+          ${TYPE_DISPLAY[type] || type}
         `;
         typeBlock.appendChild(label);
       });
@@ -817,7 +839,7 @@ function init() {
         label.style.marginBottom = "4px";
         label.innerHTML = `
           <input type="checkbox" data-status="${status}" ${plotState.selectedStatuses.has(status) ? "checked" : ""}>
-          ${status}
+          ${STATUS_DISPLAY[status] || status}
         `;
         statusBlock.appendChild(label);
       });
@@ -877,9 +899,6 @@ function init() {
     }
 
     function nominationMatchesSelectedType(nomination, selectedType) {
-      if (selectedType === "EDIT") {
-        return EDIT_SUBTYPES.includes(nomination.type);
-      }
       return nomination.type === selectedType;
     }
 
@@ -1027,7 +1046,7 @@ function init() {
           segment.style.width = "100%";
           segment.style.height = `${(row.counts[status] / row.total) * scaledHeight}px`;
           segment.style.background = STATUS_COLORS[status] || "#888";
-          segment.title = `${row.area} | ${status}: ${row.counts[status]}`;
+          segment.title = `${row.area} | ${STATUS_DISPLAY[status] || status}: ${row.counts[status]}`;
           barInner.appendChild(segment);
         });
 
@@ -1079,7 +1098,7 @@ function init() {
         `;
         item.innerHTML = `
           <span style="display:inline-block;width:12px;height:12px;background:${STATUS_COLORS[status] || "#888"};border-radius:2px;"></span>
-          <span>${status}</span>
+          <span>${STATUS_DISPLAY[status] || status}</span>
         `;
         legend.appendChild(item);
       });
