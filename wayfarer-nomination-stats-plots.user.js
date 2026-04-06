@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name        Wayfarer Nomination Stats Plots (Dev)
-// @version     0.0.7
+// @version     0.0.8
 // @description Plot nomination trends and location summaries on the Wayfarer nominations page
 // @namespace   https://github.com/toadlover/wayfarer-addons/
 // @downloadURL https://raw.githubusercontent.com/toadlover/wayfarer-addons/main/wayfarer-nomination-stats-plots.user.js
@@ -87,6 +87,79 @@ function init() {
       aggregationMode: "cityState", // or "state"
       maxBars: 20 // default number of bars to display in plot
     };
+
+    //setup to be able to export plots as png
+    function loadHtml2Canvas() {
+      return new Promise((resolve, reject) => {
+        if (window.html2canvas) {
+          resolve();
+          return;
+        }
+
+        const script = document.createElement("script");
+        script.src = "https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js";
+        script.onload = resolve;
+        script.onerror = reject;
+        document.head.appendChild(script);
+      });
+    }
+
+    async function exportCurrentPlotAsPng() {
+      await loadHtml2Canvas();
+
+      const chart = document.getElementById("wfns-plot-chart");
+      const barsWrap = document.getElementById("wfns-bars-wrap");
+
+      if (!chart || !barsWrap) {
+        console.log("Plot export failed: chart or barsWrap not found.");
+        return;
+      }
+
+      const original = {
+        chartWidth: chart.style.width,
+        chartOverflow: chart.style.overflow,
+        barsWrapWidth: barsWrap.style.width,
+        barsWrapOverflow: barsWrap.style.overflow,
+        barsWrapOverflowX: barsWrap.style.overflowX,
+      };
+
+      try {
+        const fullWidth = Math.max(barsWrap.scrollWidth, barsWrap.clientWidth);
+
+        barsWrap.style.width = `${fullWidth}px`;
+        barsWrap.style.overflow = "visible";
+        barsWrap.style.overflowX = "visible";
+
+        chart.style.width = `${fullWidth + 40}px`;
+        chart.style.overflow = "visible";
+
+        const canvas = await html2canvas(chart, {
+          backgroundColor: "#ffffff",
+          scale: 2,
+          useCORS: true
+        });
+
+        const link = document.createElement("a");
+        const mode = plotState.aggregationMode === "state" ? "state" : "citystate";
+        const date = new Date().toISOString().slice(0, 10);
+
+        const types = Array.from(plotState.selectedTypes).join("-");
+        const statuses = Array.from(plotState.selectedStatuses).join("-");
+
+        //link.download = `wayfarer_plot_${mode}_${date}.png`;
+        link.download = `wayfarer_${mode}_${types}_${statuses}_${date}.png`;
+        link.href = canvas.toDataURL("image/png");
+        link.click();
+      } catch (err) {
+        console.log("Plot export failed:", err);
+      } finally {
+        chart.style.width = original.chartWidth;
+        chart.style.overflow = original.chartOverflow;
+        barsWrap.style.width = original.barsWrapWidth;
+        barsWrap.style.overflow = original.barsWrapOverflow;
+        barsWrap.style.overflowX = original.barsWrapOverflowX;
+      }
+    }
 
     /**
      * Overwrite the open method of the XMLHttpRequest.prototype to intercept the server calls
@@ -886,6 +959,28 @@ function init() {
         });
       }
 
+      const exportBlock = document.createElement("div");
+      exportBlock.innerHTML = `
+        <div style="font-weight: 600; margin-bottom: 6px;">Export</div>
+        <button id="wfns-export-image" style="
+          padding: 6px 10px;
+          border-radius: 4px;
+          border: none;
+          background: #e5e5e5;
+          cursor: pointer;
+        ">
+          Download PNG
+        </button>
+      `;
+      wrapper.appendChild(exportBlock);
+
+      const exportBtn = wrapper.querySelector("#wfns-export-image");
+      if (exportBtn) {
+        exportBtn.addEventListener("click", () => {
+          exportCurrentPlotAsPng();
+        });
+      }
+
     }
 
     function getAreaLabel(nomination, aggregationMode) {
@@ -986,6 +1081,7 @@ function init() {
       outer.appendChild(title);
 
       const barsWrap = document.createElement("div");
+      barsWrap.id = "wfns-bars-wrap";
       barsWrap.style.cssText = `
         display: flex;
         align-items: flex-end;
