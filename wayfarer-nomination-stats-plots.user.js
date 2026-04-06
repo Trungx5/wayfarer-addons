@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name        Wayfarer Nomination Stats Plots (Dev)
-// @version     0.0.10
+// @version     0.0.11
 // @description Plot nomination trends and location summaries on the Wayfarer nominations page
 // @namespace   https://github.com/toadlover/wayfarer-addons/
 // @downloadURL https://raw.githubusercontent.com/toadlover/wayfarer-addons/main/wayfarer-nomination-stats-plots.user.js
@@ -86,7 +86,8 @@ function init() {
       selectedTypes: new Set(["NOMINATION"]),
       aggregationMode: "cityState", // or "state"
       maxBars: 20, // default number of bars to display in plot
-      timelineAreaFilter: "__ALL__"
+      timelineAreaFilter: "__ALL__",
+      timelineMode: "cumulative" // or "monthly"
     };
 
     //setup to be able to export plots as png
@@ -1092,6 +1093,27 @@ function init() {
         });
       });
 
+      const timelineModeBlock = document.createElement("div");
+      timelineModeBlock.innerHTML = `
+        <div style="font-weight: 600; margin-bottom: 6px;">Timeline mode</div>
+        <label style="display:block; margin-bottom:4px;">
+          <input type="radio" name="wfns-timeline-mode" value="monthly" ${plotState.timelineMode === "monthly" ? "checked" : ""}>
+          Monthly
+        </label>
+        <label style="display:block;">
+          <input type="radio" name="wfns-timeline-mode" value="cumulative" ${plotState.timelineMode === "cumulative" ? "checked" : ""}>
+          Cumulative
+        </label>
+      `;
+      wrapper.appendChild(timelineModeBlock);
+
+      controls.querySelectorAll('input[name="wfns-timeline-mode"]').forEach(input => {
+        input.addEventListener("change", (e) => {
+          plotState.timelineMode = e.target.value;
+          renderPlots();
+        });
+      });
+
       const maxBarsSelect = controls.querySelector("#wfns-max-bars");
       if (maxBarsSelect) {
         maxBarsSelect.addEventListener("change", (e) => {
@@ -1416,7 +1438,7 @@ function init() {
       const maxMonth = observedMonths[observedMonths.length - 1];
       const months = buildContinuousMonthRange(minMonth, maxMonth);
 
-      const series = Object.keys(countsByStatus).map(status => ({
+      let series = Object.keys(countsByStatus).map(status => ({
         key: status,
         label: STATUS_DISPLAY[status] || status,
         values: months.map(month => ({
@@ -1424,6 +1446,10 @@ function init() {
           count: countsByStatus[status][month] || 0
         }))
       }));
+
+      if (plotState.timelineMode === "cumulative") {
+        series = makeSeriesCumulative(series);
+      }
 
       return { months, series };
     }
@@ -1463,18 +1489,21 @@ function init() {
         plotState.timelineAreaFilter && plotState.timelineAreaFilter !== "__ALL__"
           ? ` (${plotState.timelineAreaFilter})`
           : " (All areas)";
-      title.textContent = `Nominations Over Time${areaText}`;
+      const modeText = plotState.timelineMode === "cumulative" ? "Cumulative Nominations Over Time" : "Nominations Over Time";
+      title.textContent = `${modeText}${areaText}`;
       title.style.cssText = "font-weight: 700; margin-bottom: 12px; color: #000;";
       outer.appendChild(title);
 
-      const maxY = Math.max(
+      const rawMaxY = Math.max(
         1,
         ...series.flatMap(s => s.values.map(v => v.count))
       );
+      const yStep = getNiceStep(rawMaxY);
+      const maxY = getNiceAxisMax(rawMaxY);
 
-      const width = Math.max(700, months.length * 70);
+      const width = Math.max(700, months.length * 24);
       const height = 320;
-      const margin = { top: 20, right: 20, bottom: 60, left: 50 };
+      const margin = { top: 20, right: 20, bottom: 50, left: 60 };
       const innerWidth = width - margin.left - margin.right;
       const innerHeight = height - margin.top - margin.bottom;
 
@@ -1506,9 +1535,7 @@ function init() {
       svg.appendChild(yAxis);
 
       // y-axis ticks and labels
-      const tickCount = 5;
-      for (let i = 0; i <= tickCount; i++) {
-        const value = Math.round((maxY * i) / tickCount);
+      for (let value = 0; value <= maxY; value += yStep) {
         const y = getY(value);
 
         const tick = document.createElementNS(svgNS, "line");
@@ -1549,14 +1576,29 @@ function init() {
       svg.appendChild(yTitle);
 
       months.forEach((month, i) => {
-        const label = document.createElementNS(svgNS, "text");
-        label.setAttribute("x", getX(i));
-        label.setAttribute("y", margin.top + innerHeight + 18);
-        label.setAttribute("text-anchor", "middle");
-        label.setAttribute("font-size", "11");
-        label.setAttribute("fill", "#000");
-        label.textContent = month;
-        svg.appendChild(label);
+        const x = getX(i);
+        const [year, monthNum] = month.split("-");
+
+        // minor tick for every month
+        const tick = document.createElementNS(svgNS, "line");
+        tick.setAttribute("x1", x);
+        tick.setAttribute("y1", margin.top + innerHeight);
+        tick.setAttribute("x2", x);
+        tick.setAttribute("y2", margin.top + innerHeight + 5);
+        tick.setAttribute("stroke", "#333");
+        svg.appendChild(tick);
+
+        // label only January
+        if (monthNum === "01") {
+          const label = document.createElementNS(svgNS, "text");
+          label.setAttribute("x", x);
+          label.setAttribute("y", margin.top + innerHeight + 18);
+          label.setAttribute("text-anchor", "middle");
+          label.setAttribute("font-size", "11");
+          label.setAttribute("fill", "#000");
+          label.textContent = year;
+          svg.appendChild(label);
+        }
       });
 
       series.forEach(s => {
@@ -1623,6 +1665,24 @@ function init() {
       chart.appendChild(outer);
     }
 
+    function getNiceStep(maxValue) {
+      if (maxValue <= 10) return 1;
+      if (maxValue <= 50) return 5;
+      if (maxValue <= 100) return 10;
+
+      const magnitude = Math.pow(10, Math.floor(Math.log10(maxValue)));
+      const normalized = maxValue / magnitude;
+
+      if (normalized <= 2) return 0.2 * magnitude;
+      if (normalized <= 5) return 0.5 * magnitude;
+      return 1 * magnitude;
+    }
+
+    function getNiceAxisMax(maxValue) {
+      const step = getNiceStep(maxValue);
+      return Math.ceil(maxValue / step) * step;
+    }
+
     function renderPlots() {
     //location plot
       const stackedData = buildStackedAreaData(nominations);
@@ -1649,6 +1709,22 @@ function init() {
       ).sort();
 
       return areas;
+    }
+
+    function makeSeriesCumulative(series) {
+      return series.map(s => {
+        let runningTotal = 0;
+        return {
+          ...s,
+          values: s.values.map(v => {
+            runningTotal += v.count;
+            return {
+              ...v,
+              count: runningTotal
+            };
+          })
+        };
+      });
     }
 
 }
