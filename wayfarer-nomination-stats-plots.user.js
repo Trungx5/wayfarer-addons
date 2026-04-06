@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name        Wayfarer Nomination Stats Plots (Dev)
-// @version     0.0.13
+// @version     0.0.14
 // @description Plot nomination trends and location summaries on the Wayfarer nominations page
 // @namespace   https://github.com/toadlover/wayfarer-addons/
 // @downloadURL https://raw.githubusercontent.com/toadlover/wayfarer-addons/main/wayfarer-nomination-stats-plots.user.js
@@ -356,6 +356,27 @@ function init() {
                 font-weight: 500;
             }
 
+            #wfns-plots-root {
+                width: 100%;
+                max-width: none;
+                margin: 16px 0 0 0;
+            }
+
+            #wfns-plots-inner,
+            #wfns-plot-chart,
+            #wfns-timeline-chart {
+                width: 100%;
+                max-width: none;
+            }
+
+            #wfns-bars-wrap {
+                justify-content: flex-start;
+            }
+
+            #wfns-bars-wrap {
+                justify-content: flex-start;
+            }
+
             `;
         const style = document.createElement('style');
         style.type = 'text/css';
@@ -367,9 +388,10 @@ function init() {
     function addPlotsSection() {
       if (document.getElementById("wfns-plots-root")) return;
 
-      const statsContainer = document.querySelector("app-submissions-list");
+      const list = document.querySelector("app-submissions-list");
+      const submissionsLayout = document.querySelector(".submissions");
 
-      if (!statsContainer) return;
+      if (!list || !submissionsLayout) return;
 
       const root = document.createElement("div");
       root.id = "wfns-plots-root";
@@ -390,13 +412,7 @@ function init() {
         </div>
       `;
 
-      // Prefer placing directly after the stats panel if it exists
-      const nomStats = document.getElementById("nomStats");
-      if (nomStats && nomStats.parentNode) {
-        nomStats.parentNode.insertBefore(root, nomStats.nextSibling);
-      } else if (statsContainer.parentNode) {
-        statsContainer.parentNode.insertBefore(root, statsContainer.nextSibling);
-      }
+      submissionsLayout.insertAdjacentElement("afterend", root);
 
       renderPlotControls();
       renderPlots();
