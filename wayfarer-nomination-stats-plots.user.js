@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name        Wayfarer Nomination Stats Plots (Dev)
-// @version     0.0.14
+// @version     0.0.18
 // @description Plot nomination trends and location summaries on the Wayfarer nominations page
 // @namespace   https://github.com/toadlover/wayfarer-addons/
 // @downloadURL https://raw.githubusercontent.com/toadlover/wayfarer-addons/main/wayfarer-nomination-stats-plots.user.js
@@ -81,7 +81,9 @@ function init() {
       aggregationMode: "cityState", // or "state"
       maxBars: 20, // default number of bars to display in plot
       timelineAreaFilter: "__ALL__",
-      timelineMode: "cumulative" // or "monthly"
+      timelineMode: "cumulative", // or "monthly"
+      showDataLabels: false, // toggle data labels on graphs
+      showAllSubmissions: false // overlay total submissions line regardless of status filter
     };
 
     //setup to be able to export plots as png
@@ -267,6 +269,43 @@ function init() {
 
     function addCss() {
         const css = `
+            /* ── Theme tokens ── */
+            #wfns-plots-root {
+                --wfns-bg:          #ffffff;
+                --wfns-bg-card:     #ffffff;
+                --wfns-border:      #dddddd;
+                --wfns-text:        #000000;
+                --wfns-text-muted:  #555555;
+                --wfns-axis:        #333333;
+                --wfns-grid:        #dddddd;
+                --wfns-ctrl-bg:     rgba(223,71,28,0.10);
+                --wfns-ctrl-bg2:    rgba(223,71,28,0.04);
+                --wfns-ctrl-border: #DF471C;
+                --wfns-input-bg:    #ffffff;
+                --wfns-input-text:  #000000;
+                --wfns-btn-bg:      #e5e5e5;
+                --wfns-btn-text:    #000000;
+                --wfns-svg-bg:      #ffffff;
+            }
+
+            .dark #wfns-plots-root {
+                --wfns-bg:          #1a1a1a;
+                --wfns-bg-card:     #242424;
+                --wfns-border:      #3a3a3a;
+                --wfns-text:        #e8e8e8;
+                --wfns-text-muted:  #aaaaaa;
+                --wfns-axis:        #cccccc;
+                --wfns-grid:        #3a3a3a;
+                --wfns-ctrl-bg:     rgba(223,71,28,0.18);
+                --wfns-ctrl-bg2:    rgba(223,71,28,0.08);
+                --wfns-ctrl-border: #ff6b3d;
+                --wfns-input-bg:    #2e2e2e;
+                --wfns-input-text:  #e8e8e8;
+                --wfns-btn-bg:      #3a3a3a;
+                --wfns-btn-text:    #e8e8e8;
+                --wfns-svg-bg:      #242424;
+            }
+
             .wrap-collabsible {
                 margin-bottom: 1.2rem;
             }
@@ -286,9 +325,7 @@ function init() {
                 transition: all 0.25s ease-out;
             }
 
-            .lbl-toggle-ns:hover {
-                color: lightgrey;
-            }
+            .lbl-toggle-ns:hover { color: lightgrey; }
 
             .lbl-toggle-ns::before {
                 content: ' ';
@@ -302,9 +339,7 @@ function init() {
                 transition: transform .2s ease-out;
             }
 
-            .toggle {
-                display:none;
-            }
+            .toggle { display: none; }
 
             .toggle:checked+.lbl-toggle-ns::before {
                 transform: rotate(90deg) translateX(-3px);
@@ -326,40 +361,19 @@ function init() {
             }
 
             .collapsible-content-ns .content-inner {
-                border-bottom: 1px solid rgba(0, 0, 0, 1);
-                border-left: 1px solid rgba(0, 0, 0, 1);
-                border-right: 1px solid rgba(0, 0, 0, 1);
+                border-bottom: 1px solid var(--wfns-border, rgba(0,0,0,1));
+                border-left:   1px solid var(--wfns-border, rgba(0,0,0,1));
+                border-right:  1px solid var(--wfns-border, rgba(0,0,0,1));
                 border-bottom-left-radius: 7px;
                 border-bottom-right-radius: 7px;
                 padding: .5rem 1rem;
-            }
-
-            /* Force controls text to black */
-            #wfns-plots-root select,
-            #wfns-plots-root button {
-                color: #000 !important;
-            }
-
-            /* Ensure dropdown text + options are readable */
-            #wfns-plots-root select option {
-                color: #000;
-            }
-
-            /* Labels (like "Max bars", "Timeline area", etc.) */
-            #wfns-plots-root div {
-                color: #000;
-            }
-
-            /* Buttons specifically */
-            #wfns-plots-root button {
-                color: #000 !important;
-                font-weight: 500;
             }
 
             #wfns-plots-root {
                 width: 100%;
                 max-width: none;
                 margin: 16px 0 0 0;
+                color: var(--wfns-text);
             }
 
             #wfns-plots-inner,
@@ -369,14 +383,130 @@ function init() {
                 max-width: none;
             }
 
-            #wfns-bars-wrap {
-                justify-content: flex-start;
+            #wfns-bars-wrap { justify-content: flex-start; }
+
+            /* Control blocks */
+            .wfns-control-block {
+                position: relative;
+                padding: 10px 12px 10px 14px;
+                border-radius: 6px;
+                overflow: hidden;
+                min-width: 90px;
             }
 
-            #wfns-bars-wrap {
-                justify-content: flex-start;
+            .wfns-control-block::before {
+                content: '';
+                position: absolute;
+                inset: 0;
+                background: linear-gradient(135deg, var(--wfns-ctrl-bg) 0%, var(--wfns-ctrl-bg2) 100%);
+                border-left: 3px solid var(--wfns-ctrl-border);
+                border-radius: 6px;
+                pointer-events: none;
+                z-index: 0;
             }
 
+            .wfns-control-block > * { position: relative; z-index: 1; }
+
+            .wfns-control-block-label {
+                font-weight: 600;
+                margin-bottom: 6px;
+                font-size: 12px;
+                text-transform: uppercase;
+                letter-spacing: 0.04em;
+                color: var(--wfns-ctrl-border) !important;
+            }
+
+            #wfns-plots-root select,
+            #wfns-plots-root input[type="checkbox"],
+            #wfns-plots-root input[type="radio"] {
+                accent-color: #DF471C;
+            }
+
+            #wfns-plots-root select {
+                background: var(--wfns-input-bg);
+                color: var(--wfns-input-text);
+                border: 1px solid var(--wfns-border);
+                border-radius: 4px;
+                padding: 4px 6px;
+            }
+
+            #wfns-plots-root label { color: var(--wfns-text); }
+
+            #wfns-plots-root button {
+                background: var(--wfns-btn-bg);
+                color: var(--wfns-btn-text);
+                border: 1px solid var(--wfns-border);
+                border-radius: 4px;
+                padding: 6px 10px;
+                cursor: pointer;
+                font-weight: 500;
+                width: 100%;
+            }
+
+            #wfns-plots-root button:hover { opacity: 0.8; }
+
+            /* Toggle switch */
+            .wfns-toggle-switch {
+                position: relative;
+                display: inline-block;
+                width: 36px;
+                height: 20px;
+                vertical-align: middle;
+                margin-right: 6px;
+            }
+
+            .wfns-toggle-switch input { opacity: 0; width: 0; height: 0; }
+
+            .wfns-toggle-slider {
+                position: absolute;
+                cursor: pointer;
+                top: 0; left: 0; right: 0; bottom: 0;
+                background: #ccc;
+                border-radius: 20px;
+                transition: background 0.2s;
+            }
+
+            .wfns-toggle-slider:before {
+                content: '';
+                position: absolute;
+                width: 14px; height: 14px;
+                left: 3px; bottom: 3px;
+                background: white;
+                border-radius: 50%;
+                transition: transform 0.2s;
+            }
+
+            .wfns-toggle-switch input:checked + .wfns-toggle-slider { background: #DF471C; }
+            .wfns-toggle-switch input:checked + .wfns-toggle-slider:before { transform: translateX(16px); }
+
+            /* Chart cards */
+            .wfns-chart-card {
+                border: 1px solid var(--wfns-border);
+                border-radius: 8px;
+                background: var(--wfns-bg-card);
+                padding: 16px;
+            }
+
+            .wfns-chart-title {
+                font-weight: 700;
+                margin-bottom: 12px;
+                color: var(--wfns-text);
+            }
+
+            .wfns-legend-item {
+                display: flex;
+                align-items: center;
+                gap: 6px;
+                font-size: 12px;
+                color: var(--wfns-text);
+            }
+
+            /* Data labels on SVG timeline */
+            .wfns-data-label {
+                font-size: 10px;
+                text-anchor: middle;
+                pointer-events: none;
+            }
             `;
         const style = document.createElement('style');
         style.type = 'text/css';
@@ -434,71 +564,128 @@ function init() {
         justify-content: space-between;
       `;
 
+      // Helper to create a styled control block with background bar
+      function makeControlBlock() {
+        const block = document.createElement("div");
+        block.className = "wfns-control-block";
+        return block;
+      }
+
+      function makeControlLabel(text) {
+        const label = document.createElement("div");
+        label.className = "wfns-control-block-label";
+        label.textContent = text;
+        return label;
+      }
+
       // Max bars selector
-      const maxBarsBlock = document.createElement("div");
-      maxBarsBlock.innerHTML = `
-        <div style="font-weight: 600; margin-bottom: 6px;">Max bars</div>
-        <select id="wfns-max-bars" style="padding: 4px 6px; border-radius: 4px;">
-          <option value="20" ${plotState.maxBars === 20 ? "selected" : ""}>20</option>
-          <option value="50" ${plotState.maxBars === 50 ? "selected" : ""}>50</option>
-          <option value="100" ${plotState.maxBars === 100 ? "selected" : ""}>100</option>
-          <option value="200" ${plotState.maxBars === 200 ? "selected" : ""}>200</option>
-          <option value="all" ${plotState.maxBars === "all" ? "selected" : ""}>All</option>
-        </select>
-      `;
+      const maxBarsBlock = makeControlBlock();
+      maxBarsBlock.appendChild(makeControlLabel("Max Bars"));
+      const maxBarsSelect = document.createElement("select");
+      maxBarsSelect.id = "wfns-max-bars";
+      maxBarsSelect.style.cssText = "padding: 4px 6px; border-radius: 4px;";
+      [20, 50, 100, 200].forEach(v => {
+        const opt = document.createElement("option");
+        opt.value = v;
+        opt.textContent = v;
+        if (plotState.maxBars === v) opt.selected = true;
+        maxBarsSelect.appendChild(opt);
+      });
+      const allOpt = document.createElement("option");
+      allOpt.value = "all";
+      allOpt.textContent = "All";
+      if (plotState.maxBars === "all") allOpt.selected = true;
+      maxBarsSelect.appendChild(allOpt);
+      maxBarsBlock.appendChild(maxBarsSelect);
       wrapper.appendChild(maxBarsBlock);
 
       // Aggregation selector
-      const aggBlock = document.createElement("div");
-      aggBlock.innerHTML = `
-        <div style="font-weight: 600; margin-bottom: 6px;">Aggregate by</div>
-        <label style="display:block; margin-bottom:4px;">
-          <input type="radio" name="wfns-agg" value="cityState" ${plotState.aggregationMode === "cityState" ? "checked" : ""}>
-          City + State
-        </label>
-        <label style="display:block;">
-          <input type="radio" name="wfns-agg" value="state" ${plotState.aggregationMode === "state" ? "checked" : ""}>
-          State
-        </label>
-      `;
+      const aggBlock = makeControlBlock();
+      aggBlock.appendChild(makeControlLabel("Aggregate By"));
+      [["cityState", "City + State"], ["state", "State"]].forEach(([val, text]) => {
+        const lbl = document.createElement("label");
+        lbl.style.cssText = "display:block; margin-bottom:4px; cursor:pointer;";
+        lbl.innerHTML = `<input type="radio" name="wfns-agg" value="${val}" ${plotState.aggregationMode === val ? "checked" : ""}> ${text}`;
+        aggBlock.appendChild(lbl);
+      });
       wrapper.appendChild(aggBlock);
 
       // Timeline area selector
-      const timelineAreaBlock = document.createElement("div");
-      timelineAreaBlock.innerHTML = `
-        <div style="font-weight: 600; margin-bottom: 6px;">Timeline area</div>
-        <select id="wfns-timeline-area" style="padding: 4px 6px; border-radius: 4px;">
-          <option value="__ALL__">All areas</option>
-        </select>
-      `;
+      const timelineAreaBlock = makeControlBlock();
+      timelineAreaBlock.appendChild(makeControlLabel("Timeline Area"));
+      const timelineAreaSelect = document.createElement("select");
+      timelineAreaSelect.id = "wfns-timeline-area";
+      timelineAreaSelect.style.cssText = "padding: 4px 6px; border-radius: 4px; max-width: 140px;";
+      const allAreaOpt = document.createElement("option");
+      allAreaOpt.value = "__ALL__";
+      allAreaOpt.textContent = "All areas";
+      timelineAreaSelect.appendChild(allAreaOpt);
+      timelineAreaBlock.appendChild(timelineAreaSelect);
       wrapper.appendChild(timelineAreaBlock);
 
+      // Timeline mode selector
+      const timelineModeBlock = makeControlBlock();
+      timelineModeBlock.appendChild(makeControlLabel("Timeline Mode"));
+      [["monthly", "Monthly"], ["cumulative", "Cumulative"]].forEach(([val, text]) => {
+        const lbl = document.createElement("label");
+        lbl.style.cssText = "display:block; margin-bottom:4px; cursor:pointer;";
+        lbl.innerHTML = `<input type="radio" name="wfns-timeline-mode" value="${val}" ${plotState.timelineMode === val ? "checked" : ""}> ${text}`;
+        timelineModeBlock.appendChild(lbl);
+      });
+      wrapper.appendChild(timelineModeBlock);
+
+      // Data labels toggle
+      const dataLabelsBlock = makeControlBlock();
+      dataLabelsBlock.appendChild(makeControlLabel("Show Numbers"));
+      const toggleWrap = document.createElement("label");
+      toggleWrap.style.cssText = "display:flex; align-items:center; gap:8px; cursor:pointer; margin-top:4px;";
+      toggleWrap.innerHTML = `
+        <label class="wfns-toggle-switch">
+          <input type="checkbox" id="wfns-data-labels-toggle" ${plotState.showDataLabels ? "checked" : ""}>
+          <span class="wfns-toggle-slider"></span>
+        </label>
+        <span id="wfns-data-labels-text" style="font-size:12px;">${plotState.showDataLabels ? "On" : "Off"}</span>
+      `;
+      dataLabelsBlock.appendChild(toggleWrap);
+      wrapper.appendChild(dataLabelsBlock);
+
+      // All submissions overlay toggle
+      const allSubBlock = makeControlBlock();
+      allSubBlock.appendChild(makeControlLabel("All Submissions"));
+      const allSubWrap = document.createElement("label");
+      allSubWrap.style.cssText = "display:flex; align-items:center; gap:8px; cursor:pointer; margin-top:4px;";
+      allSubWrap.innerHTML = `
+        <label class="wfns-toggle-switch">
+          <input type="checkbox" id="wfns-all-submissions-toggle" ${plotState.showAllSubmissions ? "checked" : ""}>
+          <span class="wfns-toggle-slider"></span>
+        </label>
+        <span id="wfns-all-submissions-text" style="font-size:12px;">${plotState.showAllSubmissions ? "On" : "Off"}</span>
+      `;
+      const allSubNote = document.createElement("div");
+      allSubNote.style.cssText = "font-size:10px; margin-top:4px; color: var(--wfns-text-muted, #888);";
+      allSubNote.textContent = "Shows total regardless of status";
+      allSubBlock.appendChild(allSubWrap);
+      allSubBlock.appendChild(allSubNote);
+      wrapper.appendChild(allSubBlock);
+
       // Type selector
-      const typeBlock = document.createElement("div");
-      typeBlock.innerHTML = `<div style="font-weight: 600; margin-bottom: 6px;">Types</div>`;
+      const typeBlock = makeControlBlock();
+      typeBlock.appendChild(makeControlLabel("Types"));
       PLOT_TYPE_OPTIONS.forEach(type => {
         const label = document.createElement("label");
-        label.style.display = "block";
-        label.style.marginBottom = "4px";
-        label.innerHTML = `
-          <input type="checkbox" data-type="${type}" ${plotState.selectedTypes.has(type) ? "checked" : ""}>
-          ${TYPE_DISPLAY[type] || type}
-        `;
+        label.style.cssText = "display:block; margin-bottom:4px; cursor:pointer;";
+        label.innerHTML = `<input type="checkbox" data-type="${type}" ${plotState.selectedTypes.has(type) ? "checked" : ""}> ${TYPE_DISPLAY[type] || type}`;
         typeBlock.appendChild(label);
       });
       wrapper.appendChild(typeBlock);
 
       // Status selector
-      const statusBlock = document.createElement("div");
-      statusBlock.innerHTML = `<div style="font-weight: 600; margin-bottom: 6px;">Statuses</div>`;
+      const statusBlock = makeControlBlock();
+      statusBlock.appendChild(makeControlLabel("Statuses"));
       PLOT_STATUS_TYPES.forEach(status => {
         const label = document.createElement("label");
-        label.style.display = "block";
-        label.style.marginBottom = "4px";
-        label.innerHTML = `
-          <input type="checkbox" data-status="${status}" ${plotState.selectedStatuses.has(status) ? "checked" : ""}>
-          ${STATUS_DISPLAY[status] || status}
-        `;
+        label.style.cssText = "display:block; margin-bottom:4px; cursor:pointer;";
+        label.innerHTML = `<input type="checkbox" data-status="${status}" ${plotState.selectedStatuses.has(status) ? "checked" : ""}> ${STATUS_DISPLAY[status] || status}`;
         statusBlock.appendChild(label);
       });
       wrapper.appendChild(statusBlock);
@@ -512,34 +699,30 @@ function init() {
         margin-left: auto;
         min-width: 180px;
       `;
-
       exportBlock.innerHTML = `
         <div>
-          <div style="font-weight: 600; margin-bottom: 6px;">Export area plot</div>
+          <div style="font-weight: 600; margin-bottom: 6px; color: var(--wfns-text);">Export area plot</div>
           <button id="wfns-export-area-image" style="
             padding: 6px 10px;
             border-radius: 4px;
-            border: none;
-            background: #e5e5e5;
+            border: 1px solid var(--wfns-border);
+            background: var(--wfns-btn-bg);
+            color: var(--wfns-btn-text);
             cursor: pointer;
             width: 100%;
-          ">
-            Download Area PNG
-          </button>
+          ">Download Area PNG</button>
         </div>
-
         <div>
-          <div style="font-weight: 600; margin-bottom: 6px;">Export timeline plot</div>
+          <div style="font-weight: 600; margin-bottom: 6px; color: var(--wfns-text);">Export timeline plot</div>
           <button id="wfns-export-timeline-image" style="
             padding: 6px 10px;
             border-radius: 4px;
-            border: none;
-            background: #e5e5e5;
+            border: 1px solid var(--wfns-border);
+            background: var(--wfns-btn-bg);
+            color: var(--wfns-btn-text);
             cursor: pointer;
             width: 100%;
-          ">
-            Download Timeline PNG
-          </button>
+          ">Download Timeline PNG</button>
         </div>
       `;
       wrapper.appendChild(exportBlock);
@@ -547,7 +730,6 @@ function init() {
       controls.appendChild(wrapper);
 
       // Populate timeline area dropdown
-      const timelineAreaSelect = controls.querySelector("#wfns-timeline-area");
       if (timelineAreaSelect) {
         const areas = getAvailableAreas(nominations);
 
@@ -583,6 +765,13 @@ function init() {
         });
       });
 
+      controls.querySelectorAll('input[name="wfns-timeline-mode"]').forEach(input => {
+        input.addEventListener("change", (e) => {
+          plotState.timelineMode = e.target.value;
+          renderPlots();
+        });
+      });
+
       controls.querySelectorAll("input[data-type]").forEach(input => {
         input.addEventListener("change", (e) => {
           const type = e.target.dataset.type;
@@ -607,28 +796,28 @@ function init() {
         });
       });
 
-      const timelineModeBlock = document.createElement("div");
-      timelineModeBlock.innerHTML = `
-        <div style="font-weight: 600; margin-bottom: 6px;">Timeline mode</div>
-        <label style="display:block; margin-bottom:4px;">
-          <input type="radio" name="wfns-timeline-mode" value="monthly" ${plotState.timelineMode === "monthly" ? "checked" : ""}>
-          Monthly
-        </label>
-        <label style="display:block;">
-          <input type="radio" name="wfns-timeline-mode" value="cumulative" ${plotState.timelineMode === "cumulative" ? "checked" : ""}>
-          Cumulative
-        </label>
-      `;
-      wrapper.appendChild(timelineModeBlock);
-
-      controls.querySelectorAll('input[name="wfns-timeline-mode"]').forEach(input => {
-        input.addEventListener("change", (e) => {
-          plotState.timelineMode = e.target.value;
+      // Data labels toggle listener
+      const dataLabelsToggle = controls.querySelector("#wfns-data-labels-toggle");
+      if (dataLabelsToggle) {
+        dataLabelsToggle.addEventListener("change", (e) => {
+          plotState.showDataLabels = e.target.checked;
+          const span = controls.querySelector("#wfns-data-labels-text");
+          if (span) span.textContent = plotState.showDataLabels ? "On" : "Off";
           renderPlots();
         });
-      });
+      }
 
-      const maxBarsSelect = controls.querySelector("#wfns-max-bars");
+      // All submissions toggle listener
+      const allSubToggle = controls.querySelector("#wfns-all-submissions-toggle");
+      if (allSubToggle) {
+        allSubToggle.addEventListener("change", (e) => {
+          plotState.showAllSubmissions = e.target.checked;
+          const span = controls.querySelector("#wfns-all-submissions-text");
+          if (span) span.textContent = plotState.showAllSubmissions ? "On" : "Off";
+          renderPlots();
+        });
+      }
+
       if (maxBarsSelect) {
         maxBarsSelect.addEventListener("change", (e) => {
           plotState.maxBars = e.target.value === "all" ? "all" : Number(e.target.value);
@@ -733,19 +922,22 @@ function init() {
         return;
       }
 
+      // Dark mode detection (mirrors timeline chart)
+      const isDark = document.body.classList.contains("dark") ||
+                     document.documentElement.classList.contains("dark");
+      const AREA_TEXT       = isDark ? "#e8e8e8" : "#000000";
+      const AREA_BAR_BG     = isDark ? "#2e2e2e" : "#f7f7f7";
+      const AREA_BAR_BORDER = isDark ? "#555555" : "#bbb";
+      const AREA_WRAP_BORDER = isDark ? "#3a3a3a" : "#ccc";
+
       const maxTotal = Math.max(...areaRows.map(row => row.total));
 
       const outer = document.createElement("div");
-      outer.style.cssText = `
-        border: 1px solid #ddd;
-        border-radius: 8px;
-        background: #fff;
-        padding: 16px;
-      `;
+      outer.className = "wfns-chart-card";
 
       const title = document.createElement("div");
       title.textContent = "Nominations by Area";
-      title.style.cssText = "font-weight: 700; margin-bottom: 12px; color: #000;";
+      title.className = "wfns-chart-title";
       outer.appendChild(title);
 
       const barsWrap = document.createElement("div");
@@ -756,7 +948,7 @@ function init() {
         gap: 12px;
         min-height: 280px;
         padding: 12px 0 4px 0;
-        border-bottom: 1px solid #ccc;
+        border-bottom: 1px solid ${AREA_WRAP_BORDER};
         overflow-x: auto;
       `;
 
@@ -768,6 +960,10 @@ function init() {
           align-items: center;
           width: 72px;
           flex: 0 0 72px;
+          border: 2.5px solid #000000;
+          border-radius: 6px;
+          padding: 4px 2px 4px 2px;
+          box-sizing: border-box;
         `;
 
         const totalLabel = document.createElement("div");
@@ -775,7 +971,7 @@ function init() {
         totalLabel.style.cssText = `
           font-size: 12px;
           margin-bottom: 6px;
-          color: #000;
+          color: ${AREA_TEXT};
         `;
 
         const barOuter = document.createElement("div");
@@ -785,8 +981,8 @@ function init() {
           display: flex;
           flex-direction: column-reverse;
           justify-content: flex-start;
-          border: 1px solid #bbb;
-          background: #f7f7f7;
+          border: 1px solid ${AREA_BAR_BORDER};
+          background: ${AREA_BAR_BG};
           border-radius: 4px 4px 0 0;
           overflow: hidden;
         `;
@@ -807,10 +1003,33 @@ function init() {
 
         statusesInBar.forEach(status => {
           const segment = document.createElement("div");
+          const segHeight = (row.counts[status] / row.total) * scaledHeight;
           segment.style.width = "100%";
-          segment.style.height = `${(row.counts[status] / row.total) * scaledHeight}px`;
+          segment.style.height = `${segHeight}px`;
           segment.style.background = STATUS_COLORS[status] || "#888";
+          segment.style.position = "relative";
           segment.title = `${row.area} | ${STATUS_DISPLAY[status] || status}: ${row.counts[status]}`;
+
+          // Data label inside segment
+          if (plotState.showDataLabels && segHeight >= 14) {
+            const numLabel = document.createElement("span");
+            numLabel.textContent = row.counts[status];
+            numLabel.style.cssText = `
+              position: absolute;
+              top: 50%;
+              left: 50%;
+              transform: translate(-50%, -50%);
+              font-size: 10px;
+              color: #fff;
+              font-weight: 700;
+              text-shadow: 0 0 2px rgba(0,0,0,0.6);
+              white-space: nowrap;
+              pointer-events: none;
+              line-height: 1;
+            `;
+            segment.appendChild(numLabel);
+          }
+
           barInner.appendChild(segment);
         });
 
@@ -832,7 +1051,7 @@ function init() {
           justify-content: center;
           word-break: break-word;
           overflow-wrap: anywhere;
-          color: #000;
+          color: ${AREA_TEXT};
         `;
 
         col.appendChild(totalLabel);
@@ -853,13 +1072,7 @@ function init() {
 
       Array.from(plotState.selectedStatuses).forEach(status => {
         const item = document.createElement("div");
-        item.style.cssText = `
-          display: flex;
-          align-items: center;
-          gap: 6px;
-          font-size: 12px;
-          color: #000;
-        `;
+        item.className = "wfns-legend-item";
         item.innerHTML = `
           <span style="display:inline-block;width:12px;height:12px;background:${STATUS_COLORS[status] || "#888"};border-radius:2px;"></span>
           <span>${STATUS_DISPLAY[status] || status}</span>
@@ -905,6 +1118,7 @@ function init() {
     function buildTimelineLineData(nominations) {
       const observedMonths = [];
       const countsByStatus = {};
+      const countsByMonthAll = {}; // total submissions regardless of status
 
       PLOT_STATUS_TYPES.forEach(status => {
         if (plotState.selectedStatuses.has(status)) {
@@ -914,7 +1128,6 @@ function init() {
 
       nominations.forEach(nomination => {
         if (!nomination) return;
-        if (!plotState.selectedStatuses.has(nomination.status)) return;
 
         const typeMatch = Array.from(plotState.selectedTypes).some(type =>
           nominationMatchesSelectedType(nomination, type)
@@ -935,10 +1148,14 @@ function init() {
 
         observedMonths.push(month);
 
+        // "All submissions" counter — ignores status filter
+        countsByMonthAll[month] = (countsByMonthAll[month] || 0) + 1;
+
+        // Per-status counters — only for selected statuses
+        if (!plotState.selectedStatuses.has(nomination.status)) return;
         if (!countsByStatus[nomination.status]) {
           countsByStatus[nomination.status] = {};
         }
-
         countsByStatus[nomination.status][month] =
           (countsByStatus[nomination.status][month] || 0) + 1;
       });
@@ -965,7 +1182,23 @@ function init() {
         series = makeSeriesCumulative(series);
       }
 
-      return { months, series };
+      // Build "All Submissions" series if toggled on
+      let allSeries = null;
+      if (plotState.showAllSubmissions) {
+        allSeries = {
+          key: "__ALL__",
+          label: "All Submissions",
+          values: months.map(month => ({
+            month,
+            count: countsByMonthAll[month] || 0
+          }))
+        };
+        if (plotState.timelineMode === "cumulative") {
+          allSeries = makeSeriesCumulative([allSeries])[0];
+        }
+      }
+
+      return { months, series, allSeries };
     }
 
     function renderTimelineChart(timelineData) {
@@ -974,89 +1207,125 @@ function init() {
 
       chart.innerHTML = "";
 
-      const { months, series } = timelineData;
+      const { months, series, allSeries } = timelineData;
 
       if (!months.length || !series.length) {
         chart.textContent = "No timeline data for selected filters.";
         return;
       }
 
-      const outer = document.createElement("div");
-      outer.style.cssText = `
-        border: 1px solid #ddd;
-        border-radius: 8px;
-        background: #fff;
-        padding: 16px;
-      `;
+      // Detect dark mode via the .dark class on <body> or <html>
+      const isDark = document.body.classList.contains("dark") ||
+                     document.documentElement.classList.contains("dark");
 
-      const title = document.createElement("div");
+      const COLOR_AXIS   = isDark ? "#cccccc" : "#333333";
+      const COLOR_GRID   = isDark ? "#3a3a3a" : "#dddddd";
+      const COLOR_TEXT   = isDark ? "#e8e8e8" : "#000000";
+      const COLOR_MUTED  = isDark ? "#aaaaaa" : "#555555";
+      const COLOR_BG     = isDark ? "#242424" : "#ffffff";
+      const COLOR_BORDER = isDark ? "#3a3a3a" : "#dddddd";
+      const ALL_COLOR    = isDark ? "#f0b429" : "#e67e00"; // amber for "all submissions"
+
+      const outer = document.createElement("div");
+      outer.className = "wfns-chart-card";
+
+      const titleEl = document.createElement("div");
+      titleEl.className = "wfns-chart-title";
       const areaText =
         plotState.timelineAreaFilter && plotState.timelineAreaFilter !== "__ALL__"
           ? ` (${plotState.timelineAreaFilter})`
           : " (All areas)";
       const modeText = plotState.timelineMode === "cumulative" ? "Cumulative Nominations Over Time" : "Nominations Over Time";
-      title.textContent = `${modeText}${areaText}`;
-      title.style.cssText = "font-weight: 700; margin-bottom: 12px; color: #000;";
-      outer.appendChild(title);
+      titleEl.textContent = `${modeText}${areaText}`;
+      outer.appendChild(titleEl);
 
+      // Include allSeries in Y-scale calculation
+      const allSeriesValues = allSeries ? allSeries.values.map(v => v.count) : [];
       const rawMaxY = Math.max(
         1,
-        ...series.flatMap(s => s.values.map(v => v.count))
+        ...series.flatMap(s => s.values.map(v => v.count)),
+        ...allSeriesValues
       );
       const yStep = getNiceStep(rawMaxY);
-      const maxY = getNiceAxisMax(rawMaxY);
+      const maxY  = getNiceAxisMax(rawMaxY);
 
-      const width = Math.max(700, months.length * 24);
-      const height = 320;
-      const margin = { top: 20, right: 20, bottom: 50, left: 60 };
-      const innerWidth = width - margin.left - margin.right;
+      // Responsive: use container width, fall back to 700 minimum
+      const containerWidth = chart.clientWidth || 700;
+      const width  = containerWidth;
+      const height = 440;
+      const margin = { top: 60, right: 60, bottom: 80, left: 70 };
+      const xPadLeft  = 30;
+      // Month axis spans 9/10 of the available inner width; the remaining 1/10 gives
+      // room for the arrowhead and the last tick label to never be clipped.
+      const totalInnerWidth = width - margin.left - margin.right - xPadLeft;
+      const innerWidth  = Math.floor(totalInnerWidth * 0.9);
       const innerHeight = height - margin.top - margin.bottom;
 
       const svgNS = "http://www.w3.org/2000/svg";
       const svg = document.createElementNS(svgNS, "svg");
       svg.setAttribute("width", width);
-      svg.setAttribute("height", height);
-      svg.style.display = "block";
-      svg.style.background = "#fff";
+      svg.setAttribute("height", height + 30);
+      svg.style.cssText = `display:block; background:${COLOR_BG}; width:100%;`;
 
       const xStep = months.length > 1 ? innerWidth / (months.length - 1) : 0;
-      const getX = (i) => margin.left + (months.length > 1 ? i * xStep : innerWidth / 2);
-      const getY = (v) => margin.top + innerHeight - (v / maxY) * innerHeight;
+      const getX  = (i) => margin.left + xPadLeft + (months.length > 1 ? i * xStep : innerWidth / 2);
+      const getY  = (v) => margin.top + innerHeight - (v / maxY) * innerHeight;
 
+      // ── Arrowhead marker ──
+      const defs   = document.createElementNS(svgNS, "defs");
+      const marker = document.createElementNS(svgNS, "marker");
+      marker.setAttribute("id", "wfns-arrow");
+      marker.setAttribute("markerWidth", "8");
+      marker.setAttribute("markerHeight", "8");
+      marker.setAttribute("refX", "6");
+      marker.setAttribute("refY", "3");
+      marker.setAttribute("orient", "auto");
+      const arrowPath = document.createElementNS(svgNS, "path");
+      arrowPath.setAttribute("d", "M0,0 L0,6 L8,3 z");
+      arrowPath.setAttribute("fill", COLOR_AXIS);
+      marker.appendChild(arrowPath);
+      defs.appendChild(marker);
+      svg.appendChild(defs);
+
+      const axisExtend = 14;
+
+      // X-axis — extend 10% more than innerWidth so the arrow clears the last label
+      const xAxisEnd = margin.left + xPadLeft + innerWidth + Math.floor(totalInnerWidth * 0.1) - 4;
       const xAxis = document.createElementNS(svgNS, "line");
       xAxis.setAttribute("x1", margin.left);
       xAxis.setAttribute("y1", margin.top + innerHeight);
-      xAxis.setAttribute("x2", margin.left + innerWidth);
+      xAxis.setAttribute("x2", xAxisEnd);
       xAxis.setAttribute("y2", margin.top + innerHeight);
-      xAxis.setAttribute("stroke", "#333");
+      xAxis.setAttribute("stroke", COLOR_AXIS);
+      xAxis.setAttribute("stroke-width", "1.5");
+      xAxis.setAttribute("marker-end", "url(#wfns-arrow)");
       svg.appendChild(xAxis);
 
+      // Y-axis
       const yAxis = document.createElementNS(svgNS, "line");
       yAxis.setAttribute("x1", margin.left);
-      yAxis.setAttribute("y1", margin.top);
+      yAxis.setAttribute("y1", margin.top + innerHeight);
       yAxis.setAttribute("x2", margin.left);
-      yAxis.setAttribute("y2", margin.top + innerHeight);
-      yAxis.setAttribute("stroke", "#333");
+      yAxis.setAttribute("y2", margin.top - axisExtend);
+      yAxis.setAttribute("stroke", COLOR_AXIS);
+      yAxis.setAttribute("stroke-width", "1.5");
+      yAxis.setAttribute("marker-end", "url(#wfns-arrow)");
       svg.appendChild(yAxis);
 
-      // y-axis ticks and labels
+      // ── Y-axis ticks, grid, labels ──
       for (let value = 0; value <= maxY; value += yStep) {
         const y = getY(value);
 
         const tick = document.createElementNS(svgNS, "line");
-        tick.setAttribute("x1", margin.left - 5);
-        tick.setAttribute("y1", y);
-        tick.setAttribute("x2", margin.left);
-        tick.setAttribute("y2", y);
-        tick.setAttribute("stroke", "#333");
+        tick.setAttribute("x1", margin.left - 5); tick.setAttribute("y1", y);
+        tick.setAttribute("x2", margin.left);      tick.setAttribute("y2", y);
+        tick.setAttribute("stroke", COLOR_AXIS);
         svg.appendChild(tick);
 
         const grid = document.createElementNS(svgNS, "line");
-        grid.setAttribute("x1", margin.left);
-        grid.setAttribute("y1", y);
-        grid.setAttribute("x2", margin.left + innerWidth);
-        grid.setAttribute("y2", y);
-        grid.setAttribute("stroke", "#ddd");
+        grid.setAttribute("x1", margin.left); grid.setAttribute("y1", y);
+        grid.setAttribute("x2", margin.left + xPadLeft + innerWidth); grid.setAttribute("y2", y);
+        grid.setAttribute("stroke", COLOR_GRID);
         grid.setAttribute("stroke-dasharray", "2,2");
         svg.appendChild(grid);
 
@@ -1065,106 +1334,161 @@ function init() {
         label.setAttribute("y", y + 4);
         label.setAttribute("text-anchor", "end");
         label.setAttribute("font-size", "11");
-        label.setAttribute("fill", "#000");
+        label.setAttribute("fill", COLOR_TEXT);
         label.textContent = value;
         svg.appendChild(label);
       }
 
+      // Y-axis title
       const yTitle = document.createElementNS(svgNS, "text");
       yTitle.setAttribute("x", 14);
       yTitle.setAttribute("y", margin.top + innerHeight / 2);
       yTitle.setAttribute("text-anchor", "middle");
       yTitle.setAttribute("font-size", "12");
-      yTitle.setAttribute("fill", "#000");
+      yTitle.setAttribute("fill", COLOR_TEXT);
       yTitle.setAttribute("transform", `rotate(-90 14 ${margin.top + innerHeight / 2})`);
       yTitle.textContent = "Count";
       svg.appendChild(yTitle);
 
+      // ── X-axis: month abbreviations + year brackets ──
+      const MONTH_ABBR = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+
+      const yearGroups = {};
       months.forEach((month, i) => {
-        const x = getX(i);
-        const [year, monthNum] = month.split("-");
-
-        // minor tick for every month
-        const tick = document.createElementNS(svgNS, "line");
-        tick.setAttribute("x1", x);
-        tick.setAttribute("y1", margin.top + innerHeight);
-        tick.setAttribute("x2", x);
-        tick.setAttribute("y2", margin.top + innerHeight + 5);
-        tick.setAttribute("stroke", "#333");
-        svg.appendChild(tick);
-
-        // label only January
-        if (monthNum === "01") {
-          const label = document.createElementNS(svgNS, "text");
-          label.setAttribute("x", x);
-          label.setAttribute("y", margin.top + innerHeight + 18);
-          label.setAttribute("text-anchor", "middle");
-          label.setAttribute("font-size", "11");
-          label.setAttribute("fill", "#000");
-          label.textContent = year;
-          svg.appendChild(label);
-        }
+        const [year] = month.split("-");
+        if (!yearGroups[year]) yearGroups[year] = { start: i, end: i };
+        yearGroups[year].end = i;
       });
 
-      series.forEach(s => {
-        const color = STATUS_COLORS[s.key] || "#888";
-        const points = s.values.map((v, i) => `${getX(i)},${getY(v.count)}`).join(" ");
+      months.forEach((month, i) => {
+        const x = getX(i);
+        const [, monthNum] = month.split("-");
+        const mIdx = parseInt(monthNum, 10) - 1;
 
+        const tick = document.createElementNS(svgNS, "line");
+        tick.setAttribute("x1", x); tick.setAttribute("y1", margin.top + innerHeight);
+        tick.setAttribute("x2", x); tick.setAttribute("y2", margin.top + innerHeight + 4);
+        tick.setAttribute("stroke", COLOR_AXIS);
+        svg.appendChild(tick);
+
+        const label = document.createElementNS(svgNS, "text");
+        label.setAttribute("x", x);
+        label.setAttribute("y", margin.top + innerHeight + 15);
+        label.setAttribute("text-anchor", "middle");
+        label.setAttribute("font-size", "10");
+        label.setAttribute("fill", COLOR_TEXT);
+        label.textContent = MONTH_ABBR[mIdx];
+        svg.appendChild(label);
+      });
+
+      const bracketY   = margin.top + innerHeight + 28;
+      const yearLabelY = bracketY + 24;
+
+      Object.entries(yearGroups).forEach(([year, { start, end }]) => {
+        const xStart = getX(start);
+        const xEnd   = getX(end);
+        const midX   = (xStart + xEnd) / 2;
+        const bBot   = bracketY + 10;
+
+        [[xStart, bracketY, xStart, bBot],
+         [xStart, bBot,     xEnd,   bBot],
+         [xEnd,   bracketY, xEnd,   bBot]].forEach(([x1,y1,x2,y2]) => {
+          const l = document.createElementNS(svgNS, "line");
+          l.setAttribute("x1",x1); l.setAttribute("y1",y1);
+          l.setAttribute("x2",x2); l.setAttribute("y2",y2);
+          l.setAttribute("stroke", COLOR_MUTED); l.setAttribute("stroke-width","1");
+          svg.appendChild(l);
+        });
+
+        const yearText = document.createElementNS(svgNS, "text");
+        yearText.setAttribute("x", midX);
+        yearText.setAttribute("y", yearLabelY);
+        yearText.setAttribute("text-anchor", "middle");
+        yearText.setAttribute("font-size", "11");
+        yearText.setAttribute("font-weight", "600");
+        yearText.setAttribute("fill", COLOR_TEXT);
+        yearText.textContent = year;
+        svg.appendChild(yearText);
+      });
+
+      // ── Draw series lines ──
+      function drawSeries(s, color, dashArray) {
+        const points = s.values.map((v, i) => `${getX(i)},${getY(v.count)}`).join(" ");
         const polyline = document.createElementNS(svgNS, "polyline");
         polyline.setAttribute("fill", "none");
         polyline.setAttribute("stroke", color);
         polyline.setAttribute("stroke-width", "2.5");
+        if (dashArray) polyline.setAttribute("stroke-dasharray", dashArray);
         polyline.setAttribute("points", points);
         svg.appendChild(polyline);
 
         s.values.forEach((v, i) => {
-          const circle = document.createElementNS(svgNS, "circle");
-          circle.setAttribute("cx", getX(i));
-          circle.setAttribute("cy", getY(v.count));
-          circle.setAttribute("r", "3");
-          circle.setAttribute("fill", color);
+          const cx = getX(i);
+          const cy = getY(v.count);
 
+          const circle = document.createElementNS(svgNS, "circle");
+          circle.setAttribute("cx", cx); circle.setAttribute("cy", cy);
+          circle.setAttribute("r", "3"); circle.setAttribute("fill", color);
           const titleNode = document.createElementNS(svgNS, "title");
           titleNode.textContent = `${s.label} | ${v.month}: ${v.count}`;
           circle.appendChild(titleNode);
-
           svg.appendChild(circle);
+
+          if (plotState.showDataLabels && v.count > 0) {
+            const lbl = document.createElementNS(svgNS, "text");
+            lbl.setAttribute("x", cx);
+            lbl.setAttribute("y", cy - 20);
+            lbl.setAttribute("text-anchor", "middle");
+            lbl.setAttribute("font-size", "9");
+            lbl.setAttribute("fill", color);
+            lbl.setAttribute("font-weight", "700");
+            lbl.setAttribute("class", "wfns-data-label");
+            lbl.textContent = v.count;
+            svg.appendChild(lbl);
+          }
         });
+      }
+
+      // Draw status series first, then All on top
+      series.forEach(s => {
+        drawSeries(s, STATUS_COLORS[s.key] || "#888", null);
       });
+
+      if (allSeries) {
+        drawSeries(allSeries, ALL_COLOR, "6,3");
+      }
 
       const svgWrap = document.createElement("div");
       svgWrap.id = "wfns-timeline-wrap";
-      svgWrap.style.cssText = `
-        overflow-x: auto;
-        padding-bottom: 6px;
-      `;
+      svgWrap.style.cssText = "overflow-x: auto; padding-bottom: 6px;";
       svgWrap.appendChild(svg);
       outer.appendChild(svgWrap);
 
+      // ── Legend ──
       const legend = document.createElement("div");
-      legend.style.cssText = `
-        display: flex;
-        flex-wrap: wrap;
-        gap: 12px;
-        margin-top: 12px;
-      `;
+      legend.style.cssText = "display:flex; flex-wrap:wrap; gap:12px; margin-top:12px;";
 
       series.forEach(s => {
         const color = STATUS_COLORS[s.key] || "#888";
         const item = document.createElement("div");
-        item.style.cssText = `
-          display: flex;
-          align-items: center;
-          gap: 6px;
-          font-size: 12px;
-          color: #000;
-        `;
+        item.className = "wfns-legend-item";
         item.innerHTML = `
           <span style="display:inline-block;width:12px;height:12px;background:${color};border-radius:2px;"></span>
           <span>${s.label}</span>
         `;
         legend.appendChild(item);
       });
+
+      if (allSeries) {
+        const item = document.createElement("div");
+        item.className = "wfns-legend-item";
+        item.innerHTML = `
+          <span style="display:inline-block;width:20px;height:3px;background:${ALL_COLOR};border-radius:2px;
+            border-top: 2px dashed ${ALL_COLOR}; margin-top:4px;"></span>
+          <span>All Submissions</span>
+        `;
+        legend.appendChild(item);
+      }
 
       outer.appendChild(legend);
       chart.appendChild(outer);
