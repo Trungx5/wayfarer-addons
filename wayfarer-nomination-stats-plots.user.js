@@ -83,7 +83,12 @@ function init() {
       timelineAreaFilter: "__ALL__",
       timelineMode: "cumulative", // or "monthly"
       showDataLabels: false, // toggle data labels on graphs
-      showAllSubmissions: false // overlay total submissions line regardless of status filter
+      showAllSubmissions: false, // overlay total submissions line regardless of status filter
+      showAllSubmissionsArea: false, // show blank remainder bar in area chart
+      timelineViewMode: "responsive", // "responsive" = fit to width | "scrollable" = fixed 3-letter months
+      timelineRangeEnabled: false, // toggle date-range filter on/off
+      timelineRangeStart: "",      // "YYYY-MM-DD"
+      timelineRangeEnd: ""         // "YYYY-MM-DD"
     };
 
     //setup to be able to export plots as png
@@ -507,6 +512,52 @@ function init() {
                 text-anchor: middle;
                 pointer-events: none;
             }
+
+            /* ── Control section toggles ── */
+            .wfns-sec-toggle {
+                display: flex;
+                align-items: center;
+                gap: 8px;
+                font-weight: 700;
+                font-size: 11px;
+                text-transform: uppercase;
+                letter-spacing: 0.06em;
+                padding: 6px 14px;
+                margin-bottom: 0;
+                background: var(--wfns-ctrl-bg);
+                border: 1px solid var(--wfns-ctrl-border);
+                border-radius: 6px;
+                color: var(--wfns-ctrl-border);
+                cursor: pointer;
+                user-select: none;
+                transition: background 0.15s;
+            }
+            .wfns-sec-toggle:hover {
+                background: var(--wfns-ctrl-bg2, rgba(223,71,28,0.06));
+            }
+            .wfns-sec-toggle::before {
+                content: '▶';
+                font-size: 9px;
+                display: inline-block;
+                transition: transform 0.2s;
+            }
+
+            /* Section body: hidden by default via display:none so it doesn't
+               interfere with clientWidth measurements on the chart elements. */
+            .wfns-sec-body {
+                display: none;
+                border-left: 2px solid var(--wfns-ctrl-border);
+                margin-left: 6px;
+                border-radius: 0 0 6px 6px;
+            }
+
+            /* checked state: show body + rotate arrow */
+            .wfns-sec-cb:checked + .wfns-sec-toggle::before {
+                transform: rotate(90deg);
+            }
+            .wfns-sec-cb:checked + .wfns-sec-toggle + .wfns-sec-body {
+                display: block;
+            }
             `;
         const style = document.createElement('style');
         style.type = 'text/css';
@@ -545,7 +596,8 @@ function init() {
       submissionsLayout.insertAdjacentElement("afterend", root);
 
       renderPlotControls();
-      renderPlots();
+      // Defer one frame so the browser has laid out the DOM before we read clientWidth
+      requestAnimationFrame(() => renderPlots());
     }
 
     function renderPlotControls() {
@@ -554,17 +606,7 @@ function init() {
 
       controls.innerHTML = "";
 
-      const wrapper = document.createElement("div");
-      wrapper.style.cssText = `
-        display: flex;
-        flex-wrap: wrap;
-        gap: 20px;
-        margin-bottom: 16px;
-        align-items: flex-start;
-        justify-content: space-between;
-      `;
-
-      // Helper to create a styled control block with background bar
+      // ── Helpers ──────────────────────────────────────────────────────────────
       function makeControlBlock() {
         const block = document.createElement("div");
         block.className = "wfns-control-block";
@@ -578,158 +620,273 @@ function init() {
         return label;
       }
 
-      // Max bars selector
-      const maxBarsBlock = makeControlBlock();
-      maxBarsBlock.appendChild(makeControlLabel("Max Bars"));
-      const maxBarsSelect = document.createElement("select");
-      maxBarsSelect.id = "wfns-max-bars";
-      maxBarsSelect.style.cssText = "padding: 4px 6px; border-radius: 4px;";
-      [20, 50, 100, 200].forEach(v => {
-        const opt = document.createElement("option");
-        opt.value = v;
-        opt.textContent = v;
-        if (plotState.maxBars === v) opt.selected = true;
-        maxBarsSelect.appendChild(opt);
-      });
-      const allOpt = document.createElement("option");
-      allOpt.value = "all";
-      allOpt.textContent = "All";
-      if (plotState.maxBars === "all") allOpt.selected = true;
-      maxBarsSelect.appendChild(allOpt);
-      maxBarsBlock.appendChild(maxBarsSelect);
-      wrapper.appendChild(maxBarsBlock);
+      // Creates a collapsible section row in the toggle bar
+      function makeSection(title, buildFn) {
+        const section = document.createElement("div");
+        section.style.cssText = "margin-bottom: 6px;";
 
-      // Aggregation selector
-      const aggBlock = makeControlBlock();
-      aggBlock.appendChild(makeControlLabel("Aggregate By"));
-      [["cityState", "City + State"], ["state", "State"]].forEach(([val, text]) => {
+        const uid = "wfns-sec-" + title.replace(/\W+/g, "-").toLowerCase();
+        const checkbox = document.createElement("input");
+        checkbox.type = "checkbox";
+        checkbox.id = uid;
+        checkbox.className = "wfns-sec-cb"; // dedicated class — does NOT inherit .toggle CSS
+        checkbox.style.display = "none";
+        // Remember collapsed state in plotState to survive re-renders
+        const stateKey = "_sec_" + uid;
+        checkbox.checked = plotState[stateKey] !== false; // default open
+
         const lbl = document.createElement("label");
-        lbl.style.cssText = "display:block; margin-bottom:4px; cursor:pointer;";
-        lbl.innerHTML = `<input type="radio" name="wfns-agg" value="${val}" ${plotState.aggregationMode === val ? "checked" : ""}> ${text}`;
-        aggBlock.appendChild(lbl);
-      });
-      wrapper.appendChild(aggBlock);
+        lbl.htmlFor = uid;
+        lbl.className = "wfns-sec-toggle";
+        lbl.textContent = title;
 
-      // Timeline area selector
-      const timelineAreaBlock = makeControlBlock();
-      timelineAreaBlock.appendChild(makeControlLabel("Timeline Area"));
-      const timelineAreaSelect = document.createElement("select");
-      timelineAreaSelect.id = "wfns-timeline-area";
-      timelineAreaSelect.style.cssText = "padding: 4px 6px; border-radius: 4px; max-width: 140px;";
-      const allAreaOpt = document.createElement("option");
-      allAreaOpt.value = "__ALL__";
-      allAreaOpt.textContent = "All areas";
-      timelineAreaSelect.appendChild(allAreaOpt);
-      timelineAreaBlock.appendChild(timelineAreaSelect);
-      wrapper.appendChild(timelineAreaBlock);
+        const body = document.createElement("div");
+        body.className = "wfns-sec-body";
 
-      // Timeline mode selector
-      const timelineModeBlock = makeControlBlock();
-      timelineModeBlock.appendChild(makeControlLabel("Timeline Mode"));
-      [["monthly", "Monthly"], ["cumulative", "Cumulative"]].forEach(([val, text]) => {
-        const lbl = document.createElement("label");
-        lbl.style.cssText = "display:block; margin-bottom:4px; cursor:pointer;";
-        lbl.innerHTML = `<input type="radio" name="wfns-timeline-mode" value="${val}" ${plotState.timelineMode === val ? "checked" : ""}> ${text}`;
-        timelineModeBlock.appendChild(lbl);
-      });
-      wrapper.appendChild(timelineModeBlock);
+        // inner flex row for the control blocks
+        const row = document.createElement("div");
+        row.style.cssText = "display:flex; flex-wrap:wrap; gap:12px; padding:10px 12px 10px 12px; align-items:flex-start;";
+        buildFn(row);
+        body.appendChild(row);
 
-      // Data labels toggle
-      const dataLabelsBlock = makeControlBlock();
-      dataLabelsBlock.appendChild(makeControlLabel("Show Numbers"));
-      const toggleWrap = document.createElement("label");
-      toggleWrap.style.cssText = "display:flex; align-items:center; gap:8px; cursor:pointer; margin-top:4px;";
-      toggleWrap.innerHTML = `
-        <label class="wfns-toggle-switch">
-          <input type="checkbox" id="wfns-data-labels-toggle" ${plotState.showDataLabels ? "checked" : ""}>
-          <span class="wfns-toggle-slider"></span>
-        </label>
-        <span id="wfns-data-labels-text" style="font-size:12px;">${plotState.showDataLabels ? "On" : "Off"}</span>
-      `;
-      dataLabelsBlock.appendChild(toggleWrap);
-      wrapper.appendChild(dataLabelsBlock);
+        checkbox.addEventListener("change", () => {
+          plotState[stateKey] = checkbox.checked;
+        });
 
-      // All submissions overlay toggle
-      const allSubBlock = makeControlBlock();
-      allSubBlock.appendChild(makeControlLabel("All Submissions"));
-      const allSubWrap = document.createElement("label");
-      allSubWrap.style.cssText = "display:flex; align-items:center; gap:8px; cursor:pointer; margin-top:4px;";
-      allSubWrap.innerHTML = `
-        <label class="wfns-toggle-switch">
-          <input type="checkbox" id="wfns-all-submissions-toggle" ${plotState.showAllSubmissions ? "checked" : ""}>
-          <span class="wfns-toggle-slider"></span>
-        </label>
-        <span id="wfns-all-submissions-text" style="font-size:12px;">${plotState.showAllSubmissions ? "On" : "Off"}</span>
-      `;
-      const allSubNote = document.createElement("div");
-      allSubNote.style.cssText = "font-size:10px; margin-top:4px; color: var(--wfns-text-muted, #888);";
-      allSubNote.textContent = "Shows total regardless of status";
-      allSubBlock.appendChild(allSubWrap);
-      allSubBlock.appendChild(allSubNote);
-      wrapper.appendChild(allSubBlock);
+        section.appendChild(checkbox);
+        section.appendChild(lbl);
+        section.appendChild(body);
+        return section;
+      }
 
-      // Type selector
-      const typeBlock = makeControlBlock();
-      typeBlock.appendChild(makeControlLabel("Types"));
-      PLOT_TYPE_OPTIONS.forEach(type => {
-        const label = document.createElement("label");
-        label.style.cssText = "display:block; margin-bottom:4px; cursor:pointer;";
-        label.innerHTML = `<input type="checkbox" data-type="${type}" ${plotState.selectedTypes.has(type) ? "checked" : ""}> ${TYPE_DISPLAY[type] || type}`;
-        typeBlock.appendChild(label);
-      });
-      wrapper.appendChild(typeBlock);
+      // ── Section 1: Max Bar ────────────────────────────────────────────────────
+      controls.appendChild(makeSection("Max Bar", (row) => {
+        const maxBarsBlock = makeControlBlock();
+        maxBarsBlock.appendChild(makeControlLabel("Max Bars"));
+        const maxBarsSelect = document.createElement("select");
+        maxBarsSelect.id = "wfns-max-bars";
+        maxBarsSelect.style.cssText = "padding: 4px 6px; border-radius: 4px;";
+        [20, 50, 100, 200].forEach(v => {
+          const opt = document.createElement("option");
+          opt.value = v; opt.textContent = v;
+          if (plotState.maxBars === v) opt.selected = true;
+          maxBarsSelect.appendChild(opt);
+        });
+        const allOpt = document.createElement("option");
+        allOpt.value = "all"; allOpt.textContent = "All";
+        if (plotState.maxBars === "all") allOpt.selected = true;
+        maxBarsSelect.appendChild(allOpt);
+        maxBarsBlock.appendChild(maxBarsSelect);
+        row.appendChild(maxBarsBlock);
+      }));
 
-      // Status selector
-      const statusBlock = makeControlBlock();
-      statusBlock.appendChild(makeControlLabel("Statuses"));
-      PLOT_STATUS_TYPES.forEach(status => {
-        const label = document.createElement("label");
-        label.style.cssText = "display:block; margin-bottom:4px; cursor:pointer;";
-        label.innerHTML = `<input type="checkbox" data-status="${status}" ${plotState.selectedStatuses.has(status) ? "checked" : ""}> ${STATUS_DISPLAY[status] || status}`;
-        statusBlock.appendChild(label);
-      });
-      wrapper.appendChild(statusBlock);
+      // ── Section 2: Type / Status ──────────────────────────────────────────────
+      controls.appendChild(makeSection("Type / Status", (row) => {
+        // Types
+        const typeBlock = makeControlBlock();
+        typeBlock.appendChild(makeControlLabel("Types"));
+        PLOT_TYPE_OPTIONS.forEach(type => {
+          const label = document.createElement("label");
+          label.style.cssText = "display:block; margin-bottom:4px; cursor:pointer;";
+          label.innerHTML = `<input type="checkbox" data-type="${type}" ${plotState.selectedTypes.has(type) ? "checked" : ""}> ${TYPE_DISPLAY[type] || type}`;
+          typeBlock.appendChild(label);
+        });
+        row.appendChild(typeBlock);
 
-      // Export buttons
-      const exportBlock = document.createElement("div");
-      exportBlock.style.cssText = `
-        display: flex;
-        flex-direction: column;
-        gap: 10px;
-        margin-left: auto;
-        min-width: 180px;
-      `;
-      exportBlock.innerHTML = `
-        <div>
-          <div style="font-weight: 600; margin-bottom: 6px; color: var(--wfns-text);">Export area plot</div>
-          <button id="wfns-export-area-image" style="
-            padding: 6px 10px;
-            border-radius: 4px;
-            border: 1px solid var(--wfns-border);
-            background: var(--wfns-btn-bg);
-            color: var(--wfns-btn-text);
-            cursor: pointer;
-            width: 100%;
-          ">Download Area PNG</button>
-        </div>
-        <div>
-          <div style="font-weight: 600; margin-bottom: 6px; color: var(--wfns-text);">Export timeline plot</div>
-          <button id="wfns-export-timeline-image" style="
-            padding: 6px 10px;
-            border-radius: 4px;
-            border: 1px solid var(--wfns-border);
-            background: var(--wfns-btn-bg);
-            color: var(--wfns-btn-text);
-            cursor: pointer;
-            width: 100%;
-          ">Download Timeline PNG</button>
-        </div>
-      `;
-      wrapper.appendChild(exportBlock);
+        // Status split into two columns
+        const statusBlock = makeControlBlock();
+        statusBlock.appendChild(makeControlLabel("Statuses"));
+        const statusCols = document.createElement("div");
+        statusCols.style.cssText = "display:flex; gap:14px;";
+        const col1 = document.createElement("div");
+        const col2 = document.createElement("div");
+        const half = Math.ceil(PLOT_STATUS_TYPES.length / 2);
+        PLOT_STATUS_TYPES.forEach((status, idx) => {
+          const label = document.createElement("label");
+          label.style.cssText = "display:block; margin-bottom:4px; cursor:pointer; white-space:nowrap;";
+          label.innerHTML = `<input type="checkbox" data-status="${status}" ${plotState.selectedStatuses.has(status) ? "checked" : ""}> ${STATUS_DISPLAY[status] || status}`;
+          (idx < half ? col1 : col2).appendChild(label);
+        });
+        statusCols.appendChild(col1);
+        statusCols.appendChild(col2);
+        statusBlock.appendChild(statusCols);
+        row.appendChild(statusBlock);
+      }));
 
-      controls.appendChild(wrapper);
+      // ── Section 3: By Area ────────────────────────────────────────────────────
+      controls.appendChild(makeSection("By Area", (row) => {
+        // Aggregation
+        const aggBlock = makeControlBlock();
+        aggBlock.appendChild(makeControlLabel("Aggregate By"));
+        [["cityState", "City + State"], ["state", "State"]].forEach(([val, text]) => {
+          const lbl = document.createElement("label");
+          lbl.style.cssText = "display:block; margin-bottom:4px; cursor:pointer;";
+          lbl.innerHTML = `<input type="radio" name="wfns-agg" value="${val}" ${plotState.aggregationMode === val ? "checked" : ""}> ${text}`;
+          aggBlock.appendChild(lbl);
+        });
+        row.appendChild(aggBlock);
 
-      // Populate timeline area dropdown
+        // Timeline area filter
+        const timelineAreaBlock = makeControlBlock();
+        timelineAreaBlock.appendChild(makeControlLabel("Timeline Area"));
+        const timelineAreaSelect = document.createElement("select");
+        timelineAreaSelect.id = "wfns-timeline-area";
+        timelineAreaSelect.style.cssText = "padding: 4px 6px; border-radius: 4px; max-width: 140px;";
+        const allAreaOpt = document.createElement("option");
+        allAreaOpt.value = "__ALL__"; allAreaOpt.textContent = "All areas";
+        timelineAreaSelect.appendChild(allAreaOpt);
+        timelineAreaBlock.appendChild(timelineAreaSelect);
+        row.appendChild(timelineAreaBlock);
+
+        // All Submissions in area chart toggle
+        const allSubAreaBlock = makeControlBlock();
+        allSubAreaBlock.appendChild(makeControlLabel("All Submissions"));
+        const allSubAreaWrap = document.createElement("label");
+        allSubAreaWrap.style.cssText = "display:flex; align-items:center; gap:8px; cursor:pointer; margin-top:4px;";
+        allSubAreaWrap.innerHTML = `
+          <label class="wfns-toggle-switch">
+            <input type="checkbox" id="wfns-all-submissions-area-toggle" ${plotState.showAllSubmissionsArea ? "checked" : ""}>
+            <span class="wfns-toggle-slider"></span>
+          </label>
+          <span id="wfns-all-submissions-area-text" style="font-size:12px;">${plotState.showAllSubmissionsArea ? "On" : "Off"}</span>
+        `;
+        const allSubAreaNote = document.createElement("div");
+        allSubAreaNote.style.cssText = "font-size:10px; margin-top:4px; color: var(--wfns-text-muted, #888);";
+        allSubAreaNote.textContent = "Show unselected as blank";
+        allSubAreaBlock.appendChild(allSubAreaWrap);
+        allSubAreaBlock.appendChild(allSubAreaNote);
+        row.appendChild(allSubAreaBlock);
+      }));
+
+      // ── Section 4: Chart ──────────────────────────────────────────────────────
+      controls.appendChild(makeSection("Chart", (row) => {
+        // Date Range
+        const dateRangeBlock = makeControlBlock();
+        dateRangeBlock.appendChild(makeControlLabel("Date Range"));
+        const dateRangeToggleWrap = document.createElement("label");
+        dateRangeToggleWrap.style.cssText = "display:flex; align-items:center; gap:8px; cursor:pointer; margin-bottom:8px;";
+        dateRangeToggleWrap.innerHTML = `
+          <label class="wfns-toggle-switch">
+            <input type="checkbox" id="wfns-date-range-toggle" ${plotState.timelineRangeEnabled ? "checked" : ""}>
+            <span class="wfns-toggle-slider"></span>
+          </label>
+          <span id="wfns-date-range-text" style="font-size:12px;">${plotState.timelineRangeEnabled ? "On" : "Off"}</span>
+        `;
+        dateRangeBlock.appendChild(dateRangeToggleWrap);
+        const dateInputsWrap = document.createElement("div");
+        dateInputsWrap.id = "wfns-date-range-inputs";
+        dateInputsWrap.style.cssText = `display:${plotState.timelineRangeEnabled ? "flex" : "none"}; flex-direction:column; gap:6px;`;
+        dateInputsWrap.innerHTML = `
+          <div style="display:flex; flex-direction:column; gap:2px;">
+            <span style="font-size:10px; color:var(--wfns-text-muted,#888);">From</span>
+            <input type="date" id="wfns-range-start" value="${plotState.timelineRangeStart}" style="
+              padding:3px 6px; border-radius:4px; font-size:11px;
+              background:var(--wfns-input-bg); color:var(--wfns-input-text);
+              border:1px solid var(--wfns-border); cursor:pointer;">
+          </div>
+          <div style="display:flex; flex-direction:column; gap:2px;">
+            <span style="font-size:10px; color:var(--wfns-text-muted,#888);">To</span>
+            <input type="date" id="wfns-range-end" value="${plotState.timelineRangeEnd}" style="
+              padding:3px 6px; border-radius:4px; font-size:11px;
+              background:var(--wfns-input-bg); color:var(--wfns-input-text);
+              border:1px solid var(--wfns-border); cursor:pointer;">
+          </div>
+          <div id="wfns-range-info" style="font-size:10px; color:var(--wfns-text-muted,#888); margin-top:2px;"></div>
+        `;
+        dateRangeBlock.appendChild(dateInputsWrap);
+        row.appendChild(dateRangeBlock);
+
+        // Timeline mode (monthly/cumulative)
+        const timelineModeBlock = makeControlBlock();
+        timelineModeBlock.appendChild(makeControlLabel("Timeline Mode"));
+        [["monthly", "Monthly"], ["cumulative", "Cumulative"]].forEach(([val, text]) => {
+          const lbl = document.createElement("label");
+          lbl.style.cssText = "display:block; margin-bottom:4px; cursor:pointer;";
+          lbl.innerHTML = `<input type="radio" name="wfns-timeline-mode" value="${val}" ${plotState.timelineMode === val ? "checked" : ""}> ${text}`;
+          timelineModeBlock.appendChild(lbl);
+        });
+        row.appendChild(timelineModeBlock);
+
+        // Show Numbers toggle
+        const dataLabelsBlock = makeControlBlock();
+        dataLabelsBlock.appendChild(makeControlLabel("Show Numbers"));
+        const toggleWrap = document.createElement("label");
+        toggleWrap.style.cssText = "display:flex; align-items:center; gap:8px; cursor:pointer; margin-top:4px;";
+        toggleWrap.innerHTML = `
+          <label class="wfns-toggle-switch">
+            <input type="checkbox" id="wfns-data-labels-toggle" ${plotState.showDataLabels ? "checked" : ""}>
+            <span class="wfns-toggle-slider"></span>
+          </label>
+          <span id="wfns-data-labels-text" style="font-size:12px;">${plotState.showDataLabels ? "On" : "Off"}</span>
+        `;
+        dataLabelsBlock.appendChild(toggleWrap);
+        row.appendChild(dataLabelsBlock);
+
+        // All submissions overlay toggle
+        const allSubBlock = makeControlBlock();
+        allSubBlock.appendChild(makeControlLabel("All Submissions"));
+        const allSubWrap = document.createElement("label");
+        allSubWrap.style.cssText = "display:flex; align-items:center; gap:8px; cursor:pointer; margin-top:4px;";
+        allSubWrap.innerHTML = `
+          <label class="wfns-toggle-switch">
+            <input type="checkbox" id="wfns-all-submissions-toggle" ${plotState.showAllSubmissions ? "checked" : ""}>
+            <span class="wfns-toggle-slider"></span>
+          </label>
+          <span id="wfns-all-submissions-text" style="font-size:12px;">${plotState.showAllSubmissions ? "On" : "Off"}</span>
+        `;
+        const allSubNote = document.createElement("div");
+        allSubNote.style.cssText = "font-size:10px; margin-top:4px; color: var(--wfns-text-muted, #888);";
+        allSubNote.textContent = "Shows total regardless of status";
+        allSubBlock.appendChild(allSubWrap);
+        allSubBlock.appendChild(allSubNote);
+        row.appendChild(allSubBlock);
+
+        // Chart view mode
+        const chartViewBlock = makeControlBlock();
+        chartViewBlock.appendChild(makeControlLabel("Chart View"));
+        [
+          ["responsive", "Responsive (fit width)"],
+          ["scrollable", "Scrollable (fixed months)"]
+        ].forEach(([val, text]) => {
+          const lbl = document.createElement("label");
+          lbl.style.cssText = "display:block; margin-bottom:4px; cursor:pointer;";
+          lbl.innerHTML = `<input type="radio" name="wfns-chart-view" value="${val}" ${plotState.timelineViewMode === val ? "checked" : ""}> ${text}`;
+          chartViewBlock.appendChild(lbl);
+        });
+        const chartViewNote = document.createElement("div");
+        chartViewNote.style.cssText = "font-size:10px; margin-top:4px; color: var(--wfns-text-muted, #888);";
+        chartViewNote.textContent = "Responsive auto-hides labels at scale";
+        chartViewBlock.appendChild(chartViewNote);
+        row.appendChild(chartViewBlock);
+      }));
+
+      // ── Section 5: Download PNG ───────────────────────────────────────────────
+      controls.appendChild(makeSection("Download PNG", (row) => {
+        const exportBlock = makeControlBlock();
+        exportBlock.appendChild(makeControlLabel("Export Plots"));
+        exportBlock.style.minWidth = "180px";
+
+        const btnWrap = document.createElement("div");
+        btnWrap.style.cssText = "display:flex; flex-direction:column; gap:8px; margin-top:4px;";
+
+        const areaBtn = document.createElement("button");
+        areaBtn.id = "wfns-export-area-image";
+        areaBtn.textContent = "⬇ Export Area Plot";
+        areaBtn.addEventListener("click", () => exportAreaPlotAsPng());
+
+        const timelineBtn = document.createElement("button");
+        timelineBtn.id = "wfns-export-timeline-image";
+        timelineBtn.textContent = "⬇ Export Timeline Plot";
+        timelineBtn.addEventListener("click", () => exportTimelinePlotAsPng());
+
+        btnWrap.appendChild(areaBtn);
+        btnWrap.appendChild(timelineBtn);
+        exportBlock.appendChild(btnWrap);
+        row.appendChild(exportBlock);
+      }));
+
+      // ── Populate timeline area dropdown ───────────────────────────────────────
+      const timelineAreaSelect = controls.querySelector("#wfns-timeline-area");
       if (timelineAreaSelect) {
         const areas = getAvailableAreas(nominations);
 
@@ -818,26 +975,65 @@ function init() {
         });
       }
 
-      if (maxBarsSelect) {
-        maxBarsSelect.addEventListener("change", (e) => {
-          plotState.maxBars = e.target.value === "all" ? "all" : Number(e.target.value);
+      // All submissions area chart toggle listener
+      const allSubAreaToggle = controls.querySelector("#wfns-all-submissions-area-toggle");
+      if (allSubAreaToggle) {
+        allSubAreaToggle.addEventListener("change", (e) => {
+          plotState.showAllSubmissionsArea = e.target.checked;
+          const span = controls.querySelector("#wfns-all-submissions-area-text");
+          if (span) span.textContent = plotState.showAllSubmissionsArea ? "On" : "Off";
           renderPlots();
         });
       }
 
-      const exportAreaBtn = controls.querySelector("#wfns-export-area-image");
-      if (exportAreaBtn) {
-        exportAreaBtn.addEventListener("click", () => {
-          exportAreaPlotAsPng();
+      // Chart view mode listener
+      controls.querySelectorAll('input[name="wfns-chart-view"]').forEach(input => {
+        input.addEventListener("change", (e) => {
+          plotState.timelineViewMode = e.target.value;
+          renderPlots();
+        });
+      });
+
+      // Date range toggle listener
+      const dateRangeToggle = controls.querySelector("#wfns-date-range-toggle");
+      const dateRangeInputsWrap = controls.querySelector("#wfns-date-range-inputs");
+      if (dateRangeToggle) {
+        dateRangeToggle.addEventListener("change", (e) => {
+          plotState.timelineRangeEnabled = e.target.checked;
+          const span = controls.querySelector("#wfns-date-range-text");
+          if (span) span.textContent = plotState.timelineRangeEnabled ? "On" : "Off";
+          if (dateRangeInputsWrap) {
+            dateRangeInputsWrap.style.display = plotState.timelineRangeEnabled ? "flex" : "none";
+          }
+          renderPlots();
         });
       }
 
-      const exportTimelineBtn = controls.querySelector("#wfns-export-timeline-image");
-      if (exportTimelineBtn) {
-        exportTimelineBtn.addEventListener("click", () => {
-          exportTimelinePlotAsPng();
+      // Date input listeners
+      const rangeStartInput = controls.querySelector("#wfns-range-start");
+      const rangeEndInput   = controls.querySelector("#wfns-range-end");
+      if (rangeStartInput) {
+        rangeStartInput.addEventListener("change", (e) => {
+          plotState.timelineRangeStart = e.target.value;
+          renderPlots();
         });
       }
+      if (rangeEndInput) {
+        rangeEndInput.addEventListener("change", (e) => {
+          plotState.timelineRangeEnd = e.target.value;
+          renderPlots();
+        });
+      }
+
+      // maxBarsSelect listener — query from DOM since it's built inside a closure
+      const maxBarsSelectEl = controls.querySelector("#wfns-max-bars");
+      if (maxBarsSelectEl) {
+        maxBarsSelectEl.addEventListener("change", (e) => {
+          plotState.maxBars = e.target.value === "all" ? "all" : Number(e.target.value);
+          renderPlots();
+        });
+      }
+      // Export buttons are wired directly inside the makeSection closure above.
     }
 
     function getAreaLabel(nomination, aggregationMode) {
@@ -856,28 +1052,33 @@ function init() {
 
     function buildStackedAreaData(nominations) {
       const result = {};
+      const totalByArea = {}; // total nominations per area regardless of status/type filter
 
       nominations.forEach(nomination => {
         if (!nomination) return;
-        if (!plotState.selectedStatuses.has(nomination.status)) return;
 
         const typeMatch = Array.from(plotState.selectedTypes).some(type =>
           nominationMatchesSelectedType(nomination, type)
         );
-
         if (!typeMatch) return;
 
         const area = getAreaLabel(nomination, plotState.aggregationMode);
 
-        if (!result[area]) {
-          result[area] = {};
-        }
+        // Track grand total per area (all statuses)
+        totalByArea[area] = (totalByArea[area] || 0) + 1;
 
-        if (!result[area][nomination.status]) {
-          result[area][nomination.status] = 0;
-        }
+        // Only count selected statuses for the stacked bar
+        if (!plotState.selectedStatuses.has(nomination.status)) return;
 
+        if (!result[area]) result[area] = {};
+        if (!result[area][nomination.status]) result[area][nomination.status] = 0;
         result[area][nomination.status] += 1;
+      });
+
+      // Attach total counts to each area entry so renderVerticalStackedBarChart can use them
+      Object.keys(totalByArea).forEach(area => {
+        if (!result[area]) result[area] = {};
+        result[area].__areaTotal__ = totalByArea[area];
       });
 
       return result;
@@ -887,15 +1088,15 @@ function init() {
     function getTopAreas(stackedData, maxBars = 20) {
       const rows = Object.entries(stackedData)
         .map(([area, counts]) => {
-          const total = Object.values(counts).reduce((sum, val) => sum + val, 0);
-          return { area, counts, total };
+          const areaTotal = counts.__areaTotal__ || 0;
+          const total = Object.entries(counts)
+            .filter(([k]) => k !== "__areaTotal__")
+            .reduce((sum, [, val]) => sum + val, 0);
+          return { area, counts, total, areaTotal };
         })
         .sort((a, b) => b.total - a.total);
 
-      if (maxBars === "all") {
-        return rows;
-      }
-
+      if (maxBars === "all") return rows;
       return rows.slice(0, maxBars);
     }
 
@@ -929,8 +1130,14 @@ function init() {
       const AREA_BAR_BG     = isDark ? "#2e2e2e" : "#f7f7f7";
       const AREA_BAR_BORDER = isDark ? "#555555" : "#bbb";
       const AREA_WRAP_BORDER = isDark ? "#3a3a3a" : "#ccc";
+      const BLANK_COLOR     = isDark ? "#3a3a3a" : "#e0e0e0"; // colour for unselected portion
 
-      const maxTotal = Math.max(...areaRows.map(row => row.total));
+      const showAll = plotState.showAllSubmissionsArea;
+
+      // When showAll is on, scale bars relative to the area's grand total; otherwise selected total
+      const maxTotal = showAll
+        ? Math.max(...areaRows.map(row => row.areaTotal || row.total))
+        : Math.max(...areaRows.map(row => row.total));
 
       const outer = document.createElement("div");
       outer.className = "wfns-chart-card";
@@ -953,6 +1160,13 @@ function init() {
       `;
 
       areaRows.forEach(row => {
+        const denominator = showAll ? (row.areaTotal || row.total) : row.total;
+        const scaledHeight = maxTotal > 0 ? (denominator / maxTotal) * 220 : 0;
+        const selectedHeight = (denominator > 0 && showAll)
+          ? (row.total / denominator) * scaledHeight
+          : scaledHeight;
+        const blankHeight = scaledHeight - selectedHeight;
+
         const col = document.createElement("div");
         col.style.cssText = `
           display: flex;
@@ -966,10 +1180,13 @@ function init() {
           box-sizing: border-box;
         `;
 
+        // Show selected count / total if showAll, else just selected total
         const totalLabel = document.createElement("div");
-        totalLabel.textContent = row.total;
+        totalLabel.textContent = showAll
+          ? `${row.total}/${row.areaTotal || row.total}`
+          : row.total;
         totalLabel.style.cssText = `
-          font-size: 12px;
+          font-size: ${showAll ? "10px" : "12px"};
           margin-bottom: 6px;
           color: ${AREA_TEXT};
         `;
@@ -987,8 +1204,6 @@ function init() {
           overflow: hidden;
         `;
 
-        const scaledHeight = maxTotal > 0 ? (row.total / maxTotal) * 220 : 0;
-
         const barInner = document.createElement("div");
         barInner.style.cssText = `
           width: 100%;
@@ -1003,7 +1218,9 @@ function init() {
 
         statusesInBar.forEach(status => {
           const segment = document.createElement("div");
-          const segHeight = (row.counts[status] / row.total) * scaledHeight;
+          const segHeight = denominator > 0
+            ? (row.counts[status] / denominator) * scaledHeight
+            : 0;
           segment.style.width = "100%";
           segment.style.height = `${segHeight}px`;
           segment.style.background = STATUS_COLORS[status] || "#888";
@@ -1032,6 +1249,36 @@ function init() {
 
           barInner.appendChild(segment);
         });
+
+        // Blank remainder segment (top of bar, shown in column-reverse so renders above selected)
+        if (showAll && blankHeight > 0) {
+          const blankSeg = document.createElement("div");
+          blankSeg.style.width = "100%";
+          blankSeg.style.height = `${blankHeight}px`;
+          blankSeg.style.background = BLANK_COLOR;
+          blankSeg.style.position = "relative";
+          const unselected = (row.areaTotal || row.total) - row.total;
+          blankSeg.title = `${row.area} | Unselected statuses: ${unselected}`;
+
+          if (plotState.showDataLabels && blankHeight >= 14 && unselected > 0) {
+            const numLabel = document.createElement("span");
+            numLabel.textContent = unselected;
+            numLabel.style.cssText = `
+              position: absolute;
+              top: 50%;
+              left: 50%;
+              transform: translate(-50%, -50%);
+              font-size: 10px;
+              color: ${isDark ? "#aaa" : "#555"};
+              font-weight: 700;
+              white-space: nowrap;
+              pointer-events: none;
+              line-height: 1;
+            `;
+            blankSeg.appendChild(numLabel);
+          }
+          barInner.appendChild(blankSeg);
+        }
 
         barOuter.appendChild(barInner);
 
@@ -1080,6 +1327,16 @@ function init() {
         legend.appendChild(item);
       });
 
+      if (showAll) {
+        const blankItem = document.createElement("div");
+        blankItem.className = "wfns-legend-item";
+        blankItem.innerHTML = `
+          <span style="display:inline-block;width:12px;height:12px;background:${BLANK_COLOR};border-radius:2px;border:1px solid ${AREA_BAR_BORDER};"></span>
+          <span>Unselected (all submissions)</span>
+        `;
+        legend.appendChild(blankItem);
+      }
+
       outer.appendChild(legend);
       chart.appendChild(outer);
     }
@@ -1096,29 +1353,91 @@ function init() {
       return `${year}-${month}`;
     }
 
+    function getDayKey(nomination) {
+      const dateStr = nomination.day || nomination.lastUpdateTime || nomination.imageImportedAt;
+      if (!dateStr) return "Unknown";
+      const d = new Date(dateStr);
+      if (isNaN(d)) return "Unknown";
+      const y = d.getFullYear();
+      const m = String(d.getMonth() + 1).padStart(2, "0");
+      const day = String(d.getDate()).padStart(2, "0");
+      return `${y}-${m}-${day}`;
+    }
+
+    function buildContinuousDayRange(minDay, maxDay) {
+      const days = [];
+      if (!minDay || !maxDay) return days;
+      const cur = new Date(minDay);
+      const end = new Date(maxDay);
+      while (cur <= end) {
+        const y = cur.getFullYear();
+        const m = String(cur.getMonth() + 1).padStart(2, "0");
+        const d = String(cur.getDate()).padStart(2, "0");
+        days.push(`${y}-${m}-${d}`);
+        cur.setDate(cur.getDate() + 1);
+      }
+      return days;
+    }
+
+    // Returns the granularity descriptor when a date range is active.
+    // granularity: "day" | "month"
+    // tickEvery: number of ticks (days) between shown labels (only for day mode)
+    function computeRangeGranularity(startDate, endDate) {
+      const msPerDay = 86400000;
+      const totalDays = Math.round((endDate - startDate) / msPerDay) + 1;
+
+      if (totalDays <= 19) {
+        // Show every day
+        return { granularity: "day", tickEvery: 1, totalDays };
+      }
+
+      if (totalDays <= 400) {
+        // Stay in day mode but label every N days so labels don't overlap.
+        // Aim for ~15 visible labels across the span.
+        const tickEvery = Math.max(1, Math.round(totalDays / 15));
+        return { granularity: "day", tickEvery, totalDays };
+      }
+
+      // Very long spans: fall back to monthly grouping
+      return { granularity: "month", tickEvery: 1, totalDays };
+    }
+
     function buildContinuousMonthRange(minMonth, maxMonth) {
       const months = [];
       if (!minMonth || !maxMonth) return months;
-
       let [year, month] = minMonth.split("-").map(Number);
       const [maxYear, maxMonthNum] = maxMonth.split("-").map(Number);
-
       while (year < maxYear || (year === maxYear && month <= maxMonthNum)) {
         months.push(`${year}-${String(month).padStart(2, "0")}`);
         month += 1;
-        if (month > 12) {
-          month = 1;
-          year += 1;
-        }
+        if (month > 12) { month = 1; year += 1; }
       }
-
       return months;
     }
 
     function buildTimelineLineData(nominations) {
-      const observedMonths = [];
+      const useRange = plotState.timelineRangeEnabled &&
+                       plotState.timelineRangeStart &&
+                       plotState.timelineRangeEnd;
+
+      let rangeStart = null, rangeEnd = null, rangeInfo = null;
+      if (useRange) {
+        rangeStart = new Date(plotState.timelineRangeStart);
+        rangeEnd   = new Date(plotState.timelineRangeEnd);
+        if (isNaN(rangeStart) || isNaN(rangeEnd) || rangeStart > rangeEnd) {
+          // invalid range — fall back to no filter
+          rangeStart = null; rangeEnd = null;
+        } else {
+          rangeInfo = computeRangeGranularity(rangeStart, rangeEnd);
+        }
+      }
+
+      const isDayMode = rangeInfo && rangeInfo.granularity === "day";
+
+      // Bucket keys are either "YYYY-MM-DD" (day mode) or "YYYY-MM" (month mode)
+      const observedKeys = [];
       const countsByStatus = {};
-      const countsByMonthAll = {}; // total submissions regardless of status
+      const countsByKeyAll = {};
 
       PLOT_STATUS_TYPES.forEach(status => {
         if (plotState.selectedStatuses.has(status)) {
@@ -1139,146 +1458,183 @@ function init() {
           plotState.timelineAreaFilter &&
           plotState.timelineAreaFilter !== "__ALL__" &&
           area !== plotState.timelineAreaFilter
-        ) {
-          return;
+        ) return;
+
+        // Date-range gate
+        if (rangeStart && rangeEnd) {
+          const dayKey = getDayKey(nomination);
+          if (dayKey === "Unknown") return;
+          const nomDate = new Date(dayKey);
+          if (nomDate < rangeStart || nomDate > rangeEnd) return;
         }
 
-        const month = getMonthKey(nomination);
-        if (!month || month === "Unknown") return;
+        const bucketKey = isDayMode ? getDayKey(nomination) : getMonthKey(nomination);
+        if (!bucketKey || bucketKey === "Unknown") return;
 
-        observedMonths.push(month);
+        observedKeys.push(bucketKey);
+        countsByKeyAll[bucketKey] = (countsByKeyAll[bucketKey] || 0) + 1;
 
-        // "All submissions" counter — ignores status filter
-        countsByMonthAll[month] = (countsByMonthAll[month] || 0) + 1;
-
-        // Per-status counters — only for selected statuses
         if (!plotState.selectedStatuses.has(nomination.status)) return;
-        if (!countsByStatus[nomination.status]) {
-          countsByStatus[nomination.status] = {};
-        }
-        countsByStatus[nomination.status][month] =
-          (countsByStatus[nomination.status][month] || 0) + 1;
+        if (!countsByStatus[nomination.status]) countsByStatus[nomination.status] = {};
+        countsByStatus[nomination.status][bucketKey] =
+          (countsByStatus[nomination.status][bucketKey] || 0) + 1;
       });
 
-      if (!observedMonths.length) {
-        return { months: [], series: [] };
+      if (!observedKeys.length) {
+        return { ticks: [], series: [], allSeries: null, rangeInfo, isDayMode };
       }
 
-      observedMonths.sort();
-      const minMonth = observedMonths[0];
-      const maxMonth = observedMonths[observedMonths.length - 1];
-      const months = buildContinuousMonthRange(minMonth, maxMonth);
+      observedKeys.sort();
+      const minKey = observedKeys[0];
+      const maxKey = observedKeys[observedKeys.length - 1];
+
+      // Build the full continuous tick list
+      const ticks = isDayMode
+        ? buildContinuousDayRange(minKey, maxKey)
+        : buildContinuousMonthRange(minKey, maxKey);
 
       let series = Object.keys(countsByStatus).map(status => ({
         key: status,
         label: STATUS_DISPLAY[status] || status,
-        values: months.map(month => ({
-          month,
-          count: countsByStatus[status][month] || 0
-        }))
+        values: ticks.map(t => ({ tick: t, count: countsByStatus[status][t] || 0 }))
       }));
 
       if (plotState.timelineMode === "cumulative") {
-        series = makeSeriesCumulative(series);
+        series = makeSeriesCumulativeTicks(series);
       }
 
-      // Build "All Submissions" series if toggled on
       let allSeries = null;
       if (plotState.showAllSubmissions) {
         allSeries = {
           key: "__ALL__",
           label: "All Submissions",
-          values: months.map(month => ({
-            month,
-            count: countsByMonthAll[month] || 0
-          }))
+          values: ticks.map(t => ({ tick: t, count: countsByKeyAll[t] || 0 }))
         };
         if (plotState.timelineMode === "cumulative") {
-          allSeries = makeSeriesCumulative([allSeries])[0];
+          allSeries = makeSeriesCumulativeTicks([allSeries])[0];
         }
       }
 
-      return { months, series, allSeries };
+      return { ticks, series, allSeries, rangeInfo, isDayMode };
     }
 
     function renderTimelineChart(timelineData) {
       const chart = document.getElementById("wfns-timeline-chart");
       if (!chart) return;
-
       chart.innerHTML = "";
 
-      const { months, series, allSeries } = timelineData;
+      const { ticks, series, allSeries, rangeInfo, isDayMode } = timelineData;
 
-      if (!months.length || !series.length) {
+      if (!ticks || !ticks.length || !series.length) {
         chart.textContent = "No timeline data for selected filters.";
         return;
       }
 
-      // Detect dark mode via the .dark class on <body> or <html>
+      // Update the range info hint in the control
+      const rangeInfoEl = document.getElementById("wfns-range-info");
+      if (rangeInfoEl && rangeInfo) {
+        const modeLabel = rangeInfo.granularity === "day"
+          ? `Day view — tick every ${rangeInfo.tickEvery} day(s) — ${rangeInfo.totalDays} days total`
+          : `Month view — ${rangeInfo.totalDays} days span`;
+        rangeInfoEl.textContent = modeLabel;
+      } else if (rangeInfoEl) {
+        rangeInfoEl.textContent = "";
+      }
+
       const isDark = document.body.classList.contains("dark") ||
                      document.documentElement.classList.contains("dark");
+      const COLOR_AXIS  = isDark ? "#cccccc" : "#333333";
+      const COLOR_GRID  = isDark ? "#3a3a3a" : "#dddddd";
+      const COLOR_TEXT  = isDark ? "#e8e8e8" : "#000000";
+      const COLOR_MUTED = isDark ? "#aaaaaa" : "#555555";
+      const COLOR_BG    = isDark ? "#242424" : "#ffffff";
+      const ALL_COLOR   = isDark ? "#f0b429" : "#e67e00";
 
-      const COLOR_AXIS   = isDark ? "#cccccc" : "#333333";
-      const COLOR_GRID   = isDark ? "#3a3a3a" : "#dddddd";
-      const COLOR_TEXT   = isDark ? "#e8e8e8" : "#000000";
-      const COLOR_MUTED  = isDark ? "#aaaaaa" : "#555555";
-      const COLOR_BG     = isDark ? "#242424" : "#ffffff";
-      const COLOR_BORDER = isDark ? "#3a3a3a" : "#dddddd";
-      const ALL_COLOR    = isDark ? "#f0b429" : "#e67e00"; // amber for "all submissions"
+      const MONTH_ABBR = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
 
       const outer = document.createElement("div");
       outer.className = "wfns-chart-card";
 
       const titleEl = document.createElement("div");
       titleEl.className = "wfns-chart-title";
-      const areaText =
-        plotState.timelineAreaFilter && plotState.timelineAreaFilter !== "__ALL__"
-          ? ` (${plotState.timelineAreaFilter})`
-          : " (All areas)";
-      const modeText = plotState.timelineMode === "cumulative" ? "Cumulative Nominations Over Time" : "Nominations Over Time";
-      titleEl.textContent = `${modeText}${areaText}`;
+      const areaText = plotState.timelineAreaFilter && plotState.timelineAreaFilter !== "__ALL__"
+        ? ` (${plotState.timelineAreaFilter})` : " (All areas)";
+      const modeText = plotState.timelineMode === "cumulative"
+        ? "Cumulative Nominations Over Time" : "Nominations Over Time";
+      const rangeText = (plotState.timelineRangeEnabled && plotState.timelineRangeStart && plotState.timelineRangeEnd)
+        ? ` [${plotState.timelineRangeStart} → ${plotState.timelineRangeEnd}]` : "";
+      titleEl.textContent = `${modeText}${areaText}${rangeText}`;
       outer.appendChild(titleEl);
 
-      // Include allSeries in Y-scale calculation
+      // ── Y-scale ──
       const allSeriesValues = allSeries ? allSeries.values.map(v => v.count) : [];
-      const rawMaxY = Math.max(
-        1,
-        ...series.flatMap(s => s.values.map(v => v.count)),
-        ...allSeriesValues
-      );
+      const rawMaxY = Math.max(1, ...series.flatMap(s => s.values.map(v => v.count)), ...allSeriesValues);
       const yStep = getNiceStep(rawMaxY);
       const maxY  = getNiceAxisMax(rawMaxY);
 
-      // Responsive: use container width, fall back to 700 minimum
-      const containerWidth = chart.clientWidth || 700;
-      const width  = containerWidth;
-      const height = 440;
-      const margin = { top: 60, right: 60, bottom: 80, left: 70 };
-      const xPadLeft  = 30;
-      // Month axis spans 9/10 of the available inner width; the remaining 1/10 gives
-      // room for the arrowhead and the last tick label to never be clipped.
-      const totalInnerWidth = width - margin.left - margin.right - xPadLeft;
-      const innerWidth  = Math.floor(totalInnerWidth * 0.9);
+      // ── Layout ──
+      const margin      = { top: 60, right: 60, bottom: 80, left: 70 };
+      const xPadLeft    = 30;
+      const height      = 440;
       const innerHeight = height - margin.top - margin.bottom;
+      const axisExtend  = 14;
+      const isScrollable = plotState.timelineViewMode === "scrollable";
 
+      let svgWidth, xStepSize;
+
+      if (isDayMode) {
+        // Day granularity: each tick is a day; fixed or responsive
+        const tickEvery  = rangeInfo ? rangeInfo.tickEvery : 1;
+        // xStepSize is always pixels-per-day; tickEvery only controls label density
+        if (isScrollable) {
+          xStepSize = 28; // 28px per day regardless of label density
+          svgWidth  = margin.left + xPadLeft + (ticks.length - 1) * xStepSize
+                      + margin.right + xPadLeft;
+          svgWidth  = Math.max(svgWidth, 400);
+        } else {
+          const containerWidth = chart.clientWidth || 700;
+          svgWidth  = containerWidth;
+          const totalInner = svgWidth - margin.left - margin.right - xPadLeft;
+          const innerData  = Math.floor(totalInner * 0.9);
+          xStepSize = ticks.length > 1 ? innerData / (ticks.length - 1) : 0;
+        }
+      } else {
+        // Month granularity (same as before)
+        if (isScrollable) {
+          xStepSize = 28;
+          svgWidth  = margin.left + xPadLeft + (ticks.length - 1) * xStepSize
+                      + margin.right + xPadLeft;
+          svgWidth  = Math.max(svgWidth, 400);
+        } else {
+          const containerWidth = chart.clientWidth || 700;
+          svgWidth  = containerWidth;
+          const totalInner = svgWidth - margin.left - margin.right - xPadLeft;
+          const innerData  = Math.floor(totalInner * 0.9);
+          xStepSize = ticks.length > 1 ? innerData / (ticks.length - 1) : 0;
+        }
+      }
+
+      const innerWidth = ticks.length > 1
+        ? (ticks.length - 1) * xStepSize
+        : xStepSize;
+
+      const getX = (i) => margin.left + xPadLeft + i * xStepSize;
+      const getY = (v) => margin.top + innerHeight - (v / maxY) * innerHeight;
+
+      // ── SVG ──
       const svgNS = "http://www.w3.org/2000/svg";
       const svg = document.createElementNS(svgNS, "svg");
-      svg.setAttribute("width", width);
+      svg.setAttribute("width", svgWidth);
       svg.setAttribute("height", height + 30);
-      svg.style.cssText = `display:block; background:${COLOR_BG}; width:100%;`;
+      svg.style.cssText = `display:block; background:${COLOR_BG};`;
+      if (!isScrollable) svg.style.width = "100%";
 
-      const xStep = months.length > 1 ? innerWidth / (months.length - 1) : 0;
-      const getX  = (i) => margin.left + xPadLeft + (months.length > 1 ? i * xStep : innerWidth / 2);
-      const getY  = (v) => margin.top + innerHeight - (v / maxY) * innerHeight;
-
-      // ── Arrowhead marker ──
+      // ── Arrow marker ──
       const defs   = document.createElementNS(svgNS, "defs");
       const marker = document.createElementNS(svgNS, "marker");
       marker.setAttribute("id", "wfns-arrow");
-      marker.setAttribute("markerWidth", "8");
-      marker.setAttribute("markerHeight", "8");
-      marker.setAttribute("refX", "6");
-      marker.setAttribute("refY", "3");
+      marker.setAttribute("markerWidth", "8"); marker.setAttribute("markerHeight", "8");
+      marker.setAttribute("refX", "6");        marker.setAttribute("refY", "3");
       marker.setAttribute("orient", "auto");
       const arrowPath = document.createElementNS(svgNS, "path");
       arrowPath.setAttribute("d", "M0,0 L0,6 L8,3 z");
@@ -1287,35 +1643,26 @@ function init() {
       defs.appendChild(marker);
       svg.appendChild(defs);
 
-      const axisExtend = 14;
-
-      // X-axis — extend 10% more than innerWidth so the arrow clears the last label
-      const xAxisEnd = margin.left + xPadLeft + innerWidth + Math.floor(totalInnerWidth * 0.1) - 4;
+      // ── Axes ──
+      const xAxisEnd = margin.left + xPadLeft + innerWidth +
+        (isScrollable ? 20 : Math.floor((svgWidth - margin.left - margin.right - xPadLeft) * 0.1));
       const xAxis = document.createElementNS(svgNS, "line");
-      xAxis.setAttribute("x1", margin.left);
-      xAxis.setAttribute("y1", margin.top + innerHeight);
-      xAxis.setAttribute("x2", xAxisEnd);
-      xAxis.setAttribute("y2", margin.top + innerHeight);
-      xAxis.setAttribute("stroke", COLOR_AXIS);
-      xAxis.setAttribute("stroke-width", "1.5");
+      xAxis.setAttribute("x1", margin.left); xAxis.setAttribute("y1", margin.top + innerHeight);
+      xAxis.setAttribute("x2", xAxisEnd);    xAxis.setAttribute("y2", margin.top + innerHeight);
+      xAxis.setAttribute("stroke", COLOR_AXIS); xAxis.setAttribute("stroke-width", "1.5");
       xAxis.setAttribute("marker-end", "url(#wfns-arrow)");
       svg.appendChild(xAxis);
 
-      // Y-axis
       const yAxis = document.createElementNS(svgNS, "line");
-      yAxis.setAttribute("x1", margin.left);
-      yAxis.setAttribute("y1", margin.top + innerHeight);
-      yAxis.setAttribute("x2", margin.left);
-      yAxis.setAttribute("y2", margin.top - axisExtend);
-      yAxis.setAttribute("stroke", COLOR_AXIS);
-      yAxis.setAttribute("stroke-width", "1.5");
+      yAxis.setAttribute("x1", margin.left); yAxis.setAttribute("y1", margin.top + innerHeight);
+      yAxis.setAttribute("x2", margin.left); yAxis.setAttribute("y2", margin.top - axisExtend);
+      yAxis.setAttribute("stroke", COLOR_AXIS); yAxis.setAttribute("stroke-width", "1.5");
       yAxis.setAttribute("marker-end", "url(#wfns-arrow)");
       svg.appendChild(yAxis);
 
-      // ── Y-axis ticks, grid, labels ──
+      // ── Y ticks + grid ──
       for (let value = 0; value <= maxY; value += yStep) {
         const y = getY(value);
-
         const tick = document.createElementNS(svgNS, "line");
         tick.setAttribute("x1", margin.left - 5); tick.setAttribute("y1", y);
         tick.setAttribute("x2", margin.left);      tick.setAttribute("y2", y);
@@ -1323,100 +1670,170 @@ function init() {
         svg.appendChild(tick);
 
         const grid = document.createElementNS(svgNS, "line");
-        grid.setAttribute("x1", margin.left); grid.setAttribute("y1", y);
+        grid.setAttribute("x1", margin.left);                    grid.setAttribute("y1", y);
         grid.setAttribute("x2", margin.left + xPadLeft + innerWidth); grid.setAttribute("y2", y);
-        grid.setAttribute("stroke", COLOR_GRID);
-        grid.setAttribute("stroke-dasharray", "2,2");
+        grid.setAttribute("stroke", COLOR_GRID); grid.setAttribute("stroke-dasharray", "2,2");
         svg.appendChild(grid);
 
-        const label = document.createElementNS(svgNS, "text");
-        label.setAttribute("x", margin.left - 8);
-        label.setAttribute("y", y + 4);
-        label.setAttribute("text-anchor", "end");
-        label.setAttribute("font-size", "11");
-        label.setAttribute("fill", COLOR_TEXT);
-        label.textContent = value;
-        svg.appendChild(label);
+        const lbl = document.createElementNS(svgNS, "text");
+        lbl.setAttribute("x", margin.left - 8); lbl.setAttribute("y", y + 4);
+        lbl.setAttribute("text-anchor", "end"); lbl.setAttribute("font-size", "11");
+        lbl.setAttribute("fill", COLOR_TEXT);
+        lbl.textContent = value;
+        svg.appendChild(lbl);
       }
 
-      // Y-axis title
+      // Y title
       const yTitle = document.createElementNS(svgNS, "text");
       yTitle.setAttribute("x", 14);
       yTitle.setAttribute("y", margin.top + innerHeight / 2);
-      yTitle.setAttribute("text-anchor", "middle");
-      yTitle.setAttribute("font-size", "12");
+      yTitle.setAttribute("text-anchor", "middle"); yTitle.setAttribute("font-size", "12");
       yTitle.setAttribute("fill", COLOR_TEXT);
       yTitle.setAttribute("transform", `rotate(-90 14 ${margin.top + innerHeight / 2})`);
       yTitle.textContent = "Count";
       svg.appendChild(yTitle);
 
-      // ── X-axis: month abbreviations + year brackets ──
-      const MONTH_ABBR = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
-
-      const yearGroups = {};
-      months.forEach((month, i) => {
-        const [year] = month.split("-");
-        if (!yearGroups[year]) yearGroups[year] = { start: i, end: i };
-        yearGroups[year].end = i;
-      });
-
-      months.forEach((month, i) => {
-        const x = getX(i);
-        const [, monthNum] = month.split("-");
-        const mIdx = parseInt(monthNum, 10) - 1;
-
-        const tick = document.createElementNS(svgNS, "line");
-        tick.setAttribute("x1", x); tick.setAttribute("y1", margin.top + innerHeight);
-        tick.setAttribute("x2", x); tick.setAttribute("y2", margin.top + innerHeight + 4);
-        tick.setAttribute("stroke", COLOR_AXIS);
-        svg.appendChild(tick);
-
-        const label = document.createElementNS(svgNS, "text");
-        label.setAttribute("x", x);
-        label.setAttribute("y", margin.top + innerHeight + 15);
-        label.setAttribute("text-anchor", "middle");
-        label.setAttribute("font-size", "10");
-        label.setAttribute("fill", COLOR_TEXT);
-        label.textContent = MONTH_ABBR[mIdx];
-        svg.appendChild(label);
-      });
-
+      // ── X-axis ticks + labels ──
       const bracketY   = margin.top + innerHeight + 28;
       const yearLabelY = bracketY + 24;
 
-      Object.entries(yearGroups).forEach(([year, { start, end }]) => {
-        const xStart = getX(start);
-        const xEnd   = getX(end);
-        const midX   = (xStart + xEnd) / 2;
-        const bBot   = bracketY + 10;
+      if (isDayMode) {
+        // Day-mode: label every tickEvery days, group by month in the bracket row
+        const tickEvery = rangeInfo ? rangeInfo.tickEvery : 1;
+        const monthGroups = {};
 
-        [[xStart, bracketY, xStart, bBot],
-         [xStart, bBot,     xEnd,   bBot],
-         [xEnd,   bracketY, xEnd,   bBot]].forEach(([x1,y1,x2,y2]) => {
-          const l = document.createElementNS(svgNS, "line");
-          l.setAttribute("x1",x1); l.setAttribute("y1",y1);
-          l.setAttribute("x2",x2); l.setAttribute("y2",y2);
-          l.setAttribute("stroke", COLOR_MUTED); l.setAttribute("stroke-width","1");
-          svg.appendChild(l);
+        ticks.forEach((dayKey, i) => {
+          const [year, mm, dd] = dayKey.split("-");
+          const monthKey = `${year}-${mm}`;
+          if (!monthGroups[monthKey]) monthGroups[monthKey] = { start: i, end: i, year, mm };
+          monthGroups[monthKey].end = i;
+
+          const x = getX(i);
+
+          // Tick mark (every day, small)
+          const tickEl = document.createElementNS(svgNS, "line");
+          tickEl.setAttribute("x1", x); tickEl.setAttribute("y1", margin.top + innerHeight);
+          tickEl.setAttribute("x2", x); tickEl.setAttribute("y2", margin.top + innerHeight + (i % tickEvery === 0 ? 6 : 3));
+          tickEl.setAttribute("stroke", i % tickEvery === 0 ? COLOR_AXIS : COLOR_MUTED);
+          tickEl.setAttribute("stroke-width", i % tickEvery === 0 ? "1.2" : "0.7");
+          svg.appendChild(tickEl);
+
+          // Label on regular ticks OR always on the last tick
+          const isLastTick = i === ticks.length - 1;
+          if (i % tickEvery === 0 || isLastTick) {
+            const lbl = document.createElementNS(svgNS, "text");
+            lbl.setAttribute("x", x); lbl.setAttribute("y", margin.top + innerHeight + 15);
+            lbl.setAttribute("text-anchor", isLastTick ? "end" : "middle");
+            lbl.setAttribute("font-size", "9");
+            lbl.setAttribute("fill", isLastTick ? COLOR_AXIS : COLOR_TEXT);
+            lbl.setAttribute("font-weight", isLastTick ? "700" : "400");
+            lbl.textContent = dd;
+            svg.appendChild(lbl);
+          }
         });
 
-        const yearText = document.createElementNS(svgNS, "text");
-        yearText.setAttribute("x", midX);
-        yearText.setAttribute("y", yearLabelY);
-        yearText.setAttribute("text-anchor", "middle");
-        yearText.setAttribute("font-size", "11");
-        yearText.setAttribute("font-weight", "600");
-        yearText.setAttribute("fill", COLOR_TEXT);
-        yearText.textContent = year;
-        svg.appendChild(yearText);
-      });
+        // Month brackets (replaces year brackets in day mode)
+        Object.entries(monthGroups).forEach(([monthKey, { start, end, year, mm }]) => {
+          const xStart = getX(start);
+          const xEnd   = getX(end);
+          const midX   = (xStart + xEnd) / 2;
+          const bBot   = bracketY + 10;
+          const mIdx   = parseInt(mm, 10) - 1;
+
+          [[xStart, bracketY, xStart, bBot],
+           [xStart, bBot,     xEnd,   bBot],
+           [xEnd,   bracketY, xEnd,   bBot]].forEach(([x1, y1, x2, y2]) => {
+            const l = document.createElementNS(svgNS, "line");
+            l.setAttribute("x1", x1); l.setAttribute("y1", y1);
+            l.setAttribute("x2", x2); l.setAttribute("y2", y2);
+            l.setAttribute("stroke", COLOR_MUTED); l.setAttribute("stroke-width", "1");
+            svg.appendChild(l);
+          });
+
+          // "Jan 2025" label under each month bracket
+          const mLbl = document.createElementNS(svgNS, "text");
+          mLbl.setAttribute("x", midX); mLbl.setAttribute("y", yearLabelY);
+          mLbl.setAttribute("text-anchor", "middle"); mLbl.setAttribute("font-size", "10");
+          mLbl.setAttribute("font-weight", "600"); mLbl.setAttribute("fill", COLOR_TEXT);
+          mLbl.textContent = `${MONTH_ABBR[mIdx]} ${year}`;
+          svg.appendChild(mLbl);
+        });
+
+      } else {
+        // Month-mode: same label density logic as before
+        const numYears = Object.keys(
+          ticks.reduce((acc, m) => { acc[m.split("-")[0]] = 1; return acc; }, {})
+        ).length;
+
+        const yearGroups = {};
+        ticks.forEach((tick, i) => {
+          const [year] = tick.split("-");
+          if (!yearGroups[year]) yearGroups[year] = { start: i, end: i };
+          yearGroups[year].end = i;
+        });
+
+        ticks.forEach((tick, i) => {
+          const x = getX(i);
+          const [, monthNum] = tick.split("-");
+          const mIdx = parseInt(monthNum, 10) - 1;
+          const isLastTick = i === ticks.length - 1;
+
+          const tickEl = document.createElementNS(svgNS, "line");
+          tickEl.setAttribute("x1", x); tickEl.setAttribute("y1", margin.top + innerHeight);
+          tickEl.setAttribute("x2", x); tickEl.setAttribute("y2", margin.top + innerHeight + (isLastTick ? 6 : 4));
+          tickEl.setAttribute("stroke", isLastTick ? COLOR_AXIS : COLOR_AXIS);
+          tickEl.setAttribute("stroke-width", isLastTick ? "1.8" : "1");
+          svg.appendChild(tickEl);
+
+          let labelText = null;
+          if (isLastTick)             labelText = MONTH_ABBR[mIdx];
+          else if (isScrollable)      labelText = MONTH_ABBR[mIdx];
+          else if (numYears <= 3)     labelText = MONTH_ABBR[mIdx];
+          else if (numYears <= 6)     labelText = MONTH_ABBR[mIdx][0];
+
+          if (labelText) {
+            const lbl = document.createElementNS(svgNS, "text");
+            lbl.setAttribute("x", x); lbl.setAttribute("y", margin.top + innerHeight + 15);
+            lbl.setAttribute("text-anchor", isLastTick ? "end" : "middle");
+            lbl.setAttribute("font-size", "10");
+            lbl.setAttribute("fill", COLOR_TEXT);
+            lbl.setAttribute("font-weight", isLastTick ? "700" : "400");
+            lbl.textContent = labelText;
+            svg.appendChild(lbl);
+          }
+        });
+
+        // Year brackets
+        Object.entries(yearGroups).forEach(([year, { start, end }]) => {
+          const xStart = getX(start);
+          const xEnd   = getX(end);
+          const midX   = (xStart + xEnd) / 2;
+          const bBot   = bracketY + 10;
+
+          [[xStart, bracketY, xStart, bBot],
+           [xStart, bBot,     xEnd,   bBot],
+           [xEnd,   bracketY, xEnd,   bBot]].forEach(([x1, y1, x2, y2]) => {
+            const l = document.createElementNS(svgNS, "line");
+            l.setAttribute("x1", x1); l.setAttribute("y1", y1);
+            l.setAttribute("x2", x2); l.setAttribute("y2", y2);
+            l.setAttribute("stroke", COLOR_MUTED); l.setAttribute("stroke-width", "1");
+            svg.appendChild(l);
+          });
+
+          const yearText = document.createElementNS(svgNS, "text");
+          yearText.setAttribute("x", midX); yearText.setAttribute("y", yearLabelY);
+          yearText.setAttribute("text-anchor", "middle"); yearText.setAttribute("font-size", "11");
+          yearText.setAttribute("font-weight", "600"); yearText.setAttribute("fill", COLOR_TEXT);
+          yearText.textContent = year;
+          svg.appendChild(yearText);
+        });
+      }
 
       // ── Draw series lines ──
       function drawSeries(s, color, dashArray) {
         const points = s.values.map((v, i) => `${getX(i)},${getY(v.count)}`).join(" ");
         const polyline = document.createElementNS(svgNS, "polyline");
-        polyline.setAttribute("fill", "none");
-        polyline.setAttribute("stroke", color);
+        polyline.setAttribute("fill", "none"); polyline.setAttribute("stroke", color);
         polyline.setAttribute("stroke-width", "2.5");
         if (dashArray) polyline.setAttribute("stroke-dasharray", dashArray);
         polyline.setAttribute("points", points);
@@ -1430,18 +1847,15 @@ function init() {
           circle.setAttribute("cx", cx); circle.setAttribute("cy", cy);
           circle.setAttribute("r", "3"); circle.setAttribute("fill", color);
           const titleNode = document.createElementNS(svgNS, "title");
-          titleNode.textContent = `${s.label} | ${v.month}: ${v.count}`;
+          titleNode.textContent = `${s.label} | ${v.tick || v.month}: ${v.count}`;
           circle.appendChild(titleNode);
           svg.appendChild(circle);
 
           if (plotState.showDataLabels && v.count > 0) {
             const lbl = document.createElementNS(svgNS, "text");
-            lbl.setAttribute("x", cx);
-            lbl.setAttribute("y", cy - 20);
-            lbl.setAttribute("text-anchor", "middle");
-            lbl.setAttribute("font-size", "9");
-            lbl.setAttribute("fill", color);
-            lbl.setAttribute("font-weight", "700");
+            lbl.setAttribute("x", cx); lbl.setAttribute("y", cy - 20);
+            lbl.setAttribute("text-anchor", "middle"); lbl.setAttribute("font-size", "9");
+            lbl.setAttribute("fill", color); lbl.setAttribute("font-weight", "700");
             lbl.setAttribute("class", "wfns-data-label");
             lbl.textContent = v.count;
             svg.appendChild(lbl);
@@ -1449,47 +1863,39 @@ function init() {
         });
       }
 
-      // Draw status series first, then All on top
-      series.forEach(s => {
-        drawSeries(s, STATUS_COLORS[s.key] || "#888", null);
-      });
+      series.forEach(s => drawSeries(s, STATUS_COLORS[s.key] || "#888", null));
+      if (allSeries) drawSeries(allSeries, ALL_COLOR, "6,3");
 
-      if (allSeries) {
-        drawSeries(allSeries, ALL_COLOR, "6,3");
-      }
-
+      // ── Wrap ──
       const svgWrap = document.createElement("div");
       svgWrap.id = "wfns-timeline-wrap";
-      svgWrap.style.cssText = "overflow-x: auto; padding-bottom: 6px;";
+      svgWrap.style.cssText = isScrollable
+        ? "overflow-x: auto; padding-bottom: 6px;"
+        : "overflow-x: hidden; padding-bottom: 6px;";
       svgWrap.appendChild(svg);
       outer.appendChild(svgWrap);
 
       // ── Legend ──
       const legend = document.createElement("div");
       legend.style.cssText = "display:flex; flex-wrap:wrap; gap:12px; margin-top:12px;";
-
       series.forEach(s => {
         const color = STATUS_COLORS[s.key] || "#888";
         const item = document.createElement("div");
         item.className = "wfns-legend-item";
         item.innerHTML = `
           <span style="display:inline-block;width:12px;height:12px;background:${color};border-radius:2px;"></span>
-          <span>${s.label}</span>
-        `;
+          <span>${s.label}</span>`;
         legend.appendChild(item);
       });
-
       if (allSeries) {
         const item = document.createElement("div");
         item.className = "wfns-legend-item";
         item.innerHTML = `
           <span style="display:inline-block;width:20px;height:3px;background:${ALL_COLOR};border-radius:2px;
-            border-top: 2px dashed ${ALL_COLOR}; margin-top:4px;"></span>
-          <span>All Submissions</span>
-        `;
+            border-top:2px dashed ${ALL_COLOR};margin-top:4px;"></span>
+          <span>All Submissions</span>`;
         legend.appendChild(item);
       }
-
       outer.appendChild(legend);
       chart.appendChild(outer);
     }
@@ -1554,10 +1960,21 @@ function init() {
           ...s,
           values: s.values.map(v => {
             runningTotal += v.count;
-            return {
-              ...v,
-              count: runningTotal
-            };
+            return { ...v, count: runningTotal };
+          })
+        };
+      });
+    }
+
+    // Same as makeSeriesCumulative but values use { tick, count } keys
+    function makeSeriesCumulativeTicks(series) {
+      return series.map(s => {
+        let runningTotal = 0;
+        return {
+          ...s,
+          values: s.values.map(v => {
+            runningTotal += v.count;
+            return { ...v, count: runningTotal };
           })
         };
       });
