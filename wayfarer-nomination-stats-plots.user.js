@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name        Wayfarer Nomination Stats Plots (Dev)
-// @version     0.0.23
+// @version     0.0.24
 // @description Plot nomination trends and location summaries on the Wayfarer nominations page
 // @namespace   https://github.com/toadlover/wayfarer-addons/
 // @downloadURL https://raw.githubusercontent.com/toadlover/wayfarer-addons/main/wayfarer-nomination-stats-plots.user.js
@@ -1380,26 +1380,29 @@ function init() {
     }
 
     // Returns the granularity descriptor when a date range is active.
-    // granularity: "day" | "month"
-    // tickEvery: number of ticks (days) between shown labels (only for day mode)
+    //   granularity "day" subMode "every"    → every single day  (< 30 days)
+    //   granularity "day" subMode "midrange" → 1/10/20/last-of-month (30–149 days)
+    //   granularity "month"                  → monthly ticks (>= 150 days)
     function computeRangeGranularity(startDate, endDate) {
       const msPerDay = 86400000;
       const totalDays = Math.round((endDate - startDate) / msPerDay) + 1;
+      if (totalDays < 30)  return { granularity: "day", subMode: "every",    totalDays };
+      if (totalDays < 150) return { granularity: "day", subMode: "midrange", totalDays };
+      return { granularity: "month", totalDays };
+    }
 
-      if (totalDays <= 19) {
-        // Show every day
-        return { granularity: "day", tickEvery: 1, totalDays };
-      }
+    // Days in the month that contains dayKey ("YYYY-MM-DD").
+    function daysInMonthForKey(dayKey) {
+      const [y, m] = dayKey.split("-").map(Number);
+      return new Date(y, m, 0).getDate();
+    }
 
-      if (totalDays <= 400) {
-        // Stay in day mode but label every N days so labels don't overlap.
-        // Aim for ~15 visible labels across the span.
-        const tickEvery = Math.max(1, Math.round(totalDays / 15));
-        return { granularity: "day", tickEvery, totalDays };
-      }
-
-      // Very long spans: fall back to monthly grouping
-      return { granularity: "month", tickEvery: 1, totalDays };
+    // True when day dd (1-based) should get a label in midrange mode.
+    // Rule: 1, 10, 20, last day of month — but skip 30 when the month has 31 days.
+    function isMidrangeLabelDay(dd, daysInMonth) {
+      if (dd === 1 || dd === 10 || dd === 20) return true;
+      if (dd === daysInMonth && !(daysInMonth === 31 && dd === 30)) return true;
+      return false;
     }
 
     function buildContinuousMonthRange(minMonth, maxMonth) {
@@ -1488,10 +1491,33 @@ function init() {
       const minKey = observedKeys[0];
       const maxKey = observedKeys[observedKeys.length - 1];
 
+      // When a date range is active, always span from the range boundaries so
+      // days/months with zero counts (e.g. the tail of February) are still shown.
+      let tickMin, tickMax;
+      if (useRange && rangeStart && rangeEnd) {
+        if (isDayMode) {
+          const pad = d => {
+            const y = d.getFullYear();
+            const m = String(d.getMonth() + 1).padStart(2, "0");
+            const dy = String(d.getDate()).padStart(2, "0");
+            return `${y}-${m}-${dy}`;
+          };
+          tickMin = pad(rangeStart);
+          tickMax = pad(rangeEnd);
+        } else {
+          const padM = d => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+          tickMin = padM(rangeStart);
+          tickMax = padM(rangeEnd);
+        }
+      } else {
+        tickMin = minKey;
+        tickMax = maxKey;
+      }
+
       // Build the full continuous tick list
       const ticks = isDayMode
-        ? buildContinuousDayRange(minKey, maxKey)
-        : buildContinuousMonthRange(minKey, maxKey);
+        ? buildContinuousDayRange(tickMin, tickMax)
+        : buildContinuousMonthRange(tickMin, tickMax);
 
       let series = Object.keys(countsByStatus).map(status => ({
         key: status,
@@ -1698,35 +1724,69 @@ function init() {
       const yearLabelY = bracketY + 24;
 
       if (isDayMode) {
-        // Day-mode: label every tickEvery days, group by month in the bracket row
-        const tickEvery = rangeInfo ? rangeInfo.tickEvery : 1;
+        // Determine which subMode applies (falls back to "every" if no rangeInfo)
+        const daySubMode = rangeInfo ? rangeInfo.subMode : "every";
         const monthGroups = {};
 
         ticks.forEach((dayKey, i) => {
           const [year, mm, dd] = dayKey.split("-");
+          const ddNum = parseInt(dd, 10);
           const monthKey = `${year}-${mm}`;
           if (!monthGroups[monthKey]) monthGroups[monthKey] = { start: i, end: i, year, mm };
           monthGroups[monthKey].end = i;
 
           const x = getX(i);
+          const isLastTick   = i === ticks.length - 1;
+          const dimInMonth   = daysInMonthForKey(dayKey);
 
-          // Tick mark (every day, small)
+          const isFirstTick  = i === 0;
+          const isFirstOfMonth = ddNum === 1;
+          const isLastOfMonth  = ddNum === dimInMonth;
+
+          // Decide whether this day should be labelled
+          let shouldLabel;
+          if (isLastTick || isFirstTick) {
+            shouldLabel = true; // always mark first and last date of the chart
+          } else if (daySubMode === "every") {
+            shouldLabel = true; // < 30 days: every day
+          } else {
+            // midrange: 1 / 10 / 20 / last-of-month (skip day-30 in 31-day months)
+            shouldLabel = isMidrangeLabelDay(ddNum, dimInMonth);
+          }
+
+          // Tick mark — taller and darker on labelled days
           const tickEl = document.createElementNS(svgNS, "line");
           tickEl.setAttribute("x1", x); tickEl.setAttribute("y1", margin.top + innerHeight);
-          tickEl.setAttribute("x2", x); tickEl.setAttribute("y2", margin.top + innerHeight + (i % tickEvery === 0 ? 6 : 3));
-          tickEl.setAttribute("stroke", i % tickEvery === 0 ? COLOR_AXIS : COLOR_MUTED);
-          tickEl.setAttribute("stroke-width", i % tickEvery === 0 ? "1.2" : "0.7");
+          tickEl.setAttribute("x2", x); tickEl.setAttribute("y2", margin.top + innerHeight + (shouldLabel ? 6 : 3));
+          tickEl.setAttribute("stroke", shouldLabel ? COLOR_AXIS : COLOR_MUTED);
+          tickEl.setAttribute("stroke-width", shouldLabel ? "1.2" : "0.7");
           svg.appendChild(tickEl);
 
-          // Label on regular ticks OR always on the last tick
-          const isLastTick = i === ticks.length - 1;
-          if (i % tickEvery === 0 || isLastTick) {
+          if (shouldLabel) {
             const lbl = document.createElementNS(svgNS, "text");
             lbl.setAttribute("x", x); lbl.setAttribute("y", margin.top + innerHeight + 15);
-            lbl.setAttribute("text-anchor", isLastTick ? "end" : "middle");
+            // Anchor logic to prevent label collisions at month boundaries:
+            //   • first tick of chart   → "start"  (leans right, no left overflow)
+            //   • last tick of chart    → "end"    (leans left, no right overflow)
+            //   • first day of a month  → "start"  (leans right, away from prev-month last-day label)
+            //   • last day of a month   → "end"    (leans left, away from next-month first-day label)
+            //   • everything else       → "middle"
+            let anchor;
+            if (isFirstTick) {
+              anchor = "end";
+            } else if (isLastTick) {
+              anchor = "start";
+            } else if (isFirstOfMonth) {
+              anchor = "start";
+            } else if (isLastOfMonth) {
+              anchor = "end";
+            } else {
+              anchor = "middle";
+            }
+            lbl.setAttribute("text-anchor", anchor);
             lbl.setAttribute("font-size", "9");
-            lbl.setAttribute("fill", isLastTick ? COLOR_AXIS : COLOR_TEXT);
-            lbl.setAttribute("font-weight", isLastTick ? "700" : "400");
+            lbl.setAttribute("fill", (isFirstTick || isLastTick) ? COLOR_AXIS : COLOR_TEXT);
+            lbl.setAttribute("font-weight", (isFirstTick || isLastTick) ? "700" : "400");
             lbl.textContent = dd;
             svg.appendChild(lbl);
           }
