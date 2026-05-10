@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name        Wayfarer Nomination Stats Plots (Dev)
-// @version     0.0.27
+// @version     0.0.28
 // @description Plot nomination trends and location summaries on the Wayfarer nominations page
 // @namespace   https://github.com/toadlover/wayfarer-addons/
 // @downloadURL https://raw.githubusercontent.com/toadlover/wayfarer-addons/main/wayfarer-nomination-stats-plots.user.js
@@ -12,6 +12,7 @@
 // This file is part of the Wayfarer Addons collection.
 // This file is made as a modification of the wayfarer-nomination-stats.user.js script to display figure-like plots in the web page to summarize nomination stats over time or by submission area.
 // File made by user NonEMusDingo
+// User experience substantially improved by TrungLatias
 
 // This script is free software: you can redistribute it and/or modify
 // it under the terms of the GNU General Public License as published by
