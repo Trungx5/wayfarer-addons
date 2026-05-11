@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name        Wayfarer Nomination Stats Plots (Dev)
-// @version     0.0.28
+// @version     0.0.29
 // @description Plot nomination trends and location summaries on the Wayfarer nominations page
 // @namespace   https://github.com/toadlover/wayfarer-addons/
 // @downloadURL https://raw.githubusercontent.com/toadlover/wayfarer-addons/main/wayfarer-nomination-stats-plots.user.js
@@ -945,6 +945,44 @@ function init() {
         `;
         tsDateRangeBlock.appendChild(tsDateInputsWrap);
         row.appendChild(tsDateRangeBlock);
+
+        // All Submissions in area chart toggle
+        const allSubAreaBlock = makeControlBlock();
+        allSubAreaBlock.appendChild(makeControlLabel("Show All Submissions (Area Bar Plot)"));
+        const allSubAreaWrap = document.createElement("label");
+        allSubAreaWrap.style.cssText = "display:flex; align-items:center; gap:8px; cursor:pointer; margin-top:4px;";
+        allSubAreaWrap.innerHTML = `
+          <label class="wfns-toggle-switch">
+            <input type="checkbox" id="wfns-all-submissions-area-toggle" ${plotState.showAllSubmissionsArea ? "checked" : ""}>
+            <span class="wfns-toggle-slider"></span>
+          </label>
+          <span id="wfns-all-submissions-area-text" style="font-size:12px;">${plotState.showAllSubmissionsArea ? "On" : "Off"}</span>
+        `;
+        const allSubAreaNote = document.createElement("div");
+        allSubAreaNote.style.cssText = "font-size:10px; margin-top:4px; color: var(--wfns-text-muted, #888);";
+        allSubAreaNote.textContent = "Show unselected as blank";
+        allSubAreaBlock.appendChild(allSubAreaWrap);
+        allSubAreaBlock.appendChild(allSubAreaNote);
+        row.appendChild(allSubAreaBlock);
+
+        // All submissions overlay toggle
+        const allSubBlock = makeControlBlock();
+        allSubBlock.appendChild(makeControlLabel("Show All Submissions (Timeline Plot)"));
+        const allSubWrap = document.createElement("label");
+        allSubWrap.style.cssText = "display:flex; align-items:center; gap:8px; cursor:pointer; margin-top:4px;";
+        allSubWrap.innerHTML = `
+          <label class="wfns-toggle-switch">
+            <input type="checkbox" id="wfns-all-submissions-toggle" ${plotState.showAllSubmissions ? "checked" : ""}>
+            <span class="wfns-toggle-slider"></span>
+          </label>
+          <span id="wfns-all-submissions-text" style="font-size:12px;">${plotState.showAllSubmissions ? "On" : "Off"}</span>
+        `;
+        const allSubNote = document.createElement("div");
+        allSubNote.style.cssText = "font-size:10px; margin-top:4px; color: var(--wfns-text-muted, #888);";
+        allSubNote.textContent = "Shows total regardless of status";
+        allSubBlock.appendChild(allSubWrap);
+        allSubBlock.appendChild(allSubNote);
+        row.appendChild(allSubBlock);
       }));
 
       // ── Section 3: By Area ────────────────────────────────────────────────────
@@ -1106,25 +1144,6 @@ function init() {
         timelineAreaBlock.appendChild(provinceOnlyLabel);
 
         row.appendChild(timelineAreaBlock);
-
-        // All Submissions in area chart toggle
-        const allSubAreaBlock = makeControlBlock();
-        allSubAreaBlock.appendChild(makeControlLabel("All Submissions"));
-        const allSubAreaWrap = document.createElement("label");
-        allSubAreaWrap.style.cssText = "display:flex; align-items:center; gap:8px; cursor:pointer; margin-top:4px;";
-        allSubAreaWrap.innerHTML = `
-          <label class="wfns-toggle-switch">
-            <input type="checkbox" id="wfns-all-submissions-area-toggle" ${plotState.showAllSubmissionsArea ? "checked" : ""}>
-            <span class="wfns-toggle-slider"></span>
-          </label>
-          <span id="wfns-all-submissions-area-text" style="font-size:12px;">${plotState.showAllSubmissionsArea ? "On" : "Off"}</span>
-        `;
-        const allSubAreaNote = document.createElement("div");
-        allSubAreaNote.style.cssText = "font-size:10px; margin-top:4px; color: var(--wfns-text-muted, #888);";
-        allSubAreaNote.textContent = "Show unselected as blank";
-        allSubAreaBlock.appendChild(allSubAreaWrap);
-        allSubAreaBlock.appendChild(allSubAreaNote);
-        row.appendChild(allSubAreaBlock);
       }));
 
       // ── Section 4: Chart ──────────────────────────────────────────────────────
@@ -1199,25 +1218,6 @@ function init() {
         `;
         dataLabelsBlock.appendChild(toggleWrap);
         row.appendChild(dataLabelsBlock);
-
-        // All submissions overlay toggle
-        const allSubBlock = makeControlBlock();
-        allSubBlock.appendChild(makeControlLabel("All Submissions"));
-        const allSubWrap = document.createElement("label");
-        allSubWrap.style.cssText = "display:flex; align-items:center; gap:8px; cursor:pointer; margin-top:4px;";
-        allSubWrap.innerHTML = `
-          <label class="wfns-toggle-switch">
-            <input type="checkbox" id="wfns-all-submissions-toggle" ${plotState.showAllSubmissions ? "checked" : ""}>
-            <span class="wfns-toggle-slider"></span>
-          </label>
-          <span id="wfns-all-submissions-text" style="font-size:12px;">${plotState.showAllSubmissions ? "On" : "Off"}</span>
-        `;
-        const allSubNote = document.createElement("div");
-        allSubNote.style.cssText = "font-size:10px; margin-top:4px; color: var(--wfns-text-muted, #888);";
-        allSubNote.textContent = "Shows total regardless of status";
-        allSubBlock.appendChild(allSubWrap);
-        allSubBlock.appendChild(allSubNote);
-        row.appendChild(allSubBlock);
 
         // Chart view mode
         const chartViewBlock = makeControlBlock();
